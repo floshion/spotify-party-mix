@@ -1,7 +1,4 @@
 // server.js – DJ Auto-mix (random tracks from playlist 1g39kHQqy4XHxGGftDiUWb)
-// Version simplifiée : la file d’attente est complétée exclusivement avec des titres
-// aléatoires issus de la playlist personnelle « MUSIQUES  ».
-
 import express from 'express';
 import fetch   from 'node-fetch';
 import dotenv  from 'dotenv';
@@ -13,18 +10,17 @@ dotenv.config();
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// ----- Spotify credentials (gardés en variables d’environnement) -----
 const client_id     = process.env.SPOTIFY_CLIENT_ID;
 const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
 const redirect_uri  = process.env.REDIRECT_URI || 'http://localhost:3000/callback';
 let   access_token  = null;
 let   refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
 
-// ----- Paramètres DJ -----
-const SOURCE_PLAYLIST      = '1g39kHQqy4XHxGGftDiUWb';   // <-- ID de la playlist MUSIQUES
-const TARGET_QUEUE_LENGTH  = 6;                          // taille désirée de la file
+const SOURCE_PLAYLIST      = '1g39kHQqy4XHxGGftDiUWb';
+const TARGET_QUEUE_LENGTH  = 6;
 
-let priorityQueue = [];                                  // [{ uri,name,artists,image,auto }]
+let priorityQueue = [];     // [{ uri,name,artists,image,auto }]
+let playedTracks  = new Set(); // <-- mémorise les morceaux déjà joués
 
 /* ------------------------------------------------------------------
    Auth helpers
@@ -46,7 +42,7 @@ async function refreshAccessToken () {
   } else console.error('❌ Refresh KO :', data);
 }
 await refreshAccessToken();
-setInterval(refreshAccessToken, 50 * 60 * 1000); // rafraîchit toutes les 50 min
+setInterval(refreshAccessToken, 50 * 60 * 1000);
 
 /* ------------------------------------------------------------------
    Utils : piocher des titres aléatoires dans une playlist
@@ -55,7 +51,6 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
   if (limit <= 0) return [];
   const headers = { Authorization: 'Bearer ' + access_token };
 
-  // 1) total de titres
   const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}?fields=tracks(total)&market=FR`, { headers });
   if (!metaRes.ok) return [];
   const total = (await metaRes.json()).tracks.total;
@@ -72,6 +67,9 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
     if (!itemRes.ok) continue;
     const item = (await itemRes.json()).items?.[0];
     if (!item?.track) continue;
+
+    // <-- On ignore les titres déjà joués
+    if (playedTracks.has(item.track.uri)) continue;
 
     results.push({
       uri    : item.track.uri,
@@ -95,9 +93,9 @@ async function autoFillQueue (forcePlay = false) {
     priorityQueue.push(...randoms);
   }
 
-  // Lecture immédiate si demandé
   if (forcePlay && priorityQueue.length) {
     const track = priorityQueue.shift();
+    playedTracks.add(track.uri); // <-- on marque le titre comme joué
     await fetch('https://api.spotify.com/v1/me/player/play', {
       method : 'PUT',
       headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -141,10 +139,13 @@ app.post('/add-priority-track', async (req, res) => {
   const uri = req.query.uri;
   if (!uri) return res.status(400).json({ error: 'No URI provided' });
 
-  // On purge les autos pour éviter l’inflation
+  // <-- On refuse si déjà joué
+  if (playedTracks.has(uri)) {
+    return res.status(400).json({ error: 'Track already played' });
+  }
+
   priorityQueue = priorityQueue.filter(t => !t.auto);
 
-  // Infos du titre invité
   const trackId  = uri.split(':').pop();
   const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${trackId}?market=FR`, { headers: { Authorization: 'Bearer ' + access_token } });
   const track    = await trackRes.json();
@@ -152,7 +153,6 @@ app.post('/add-priority-track', async (req, res) => {
   const trackInfo = { uri, name: track.name, artists: track.artists.map(a => a.name).join(', '), image: track.album.images?.[0]?.url || '', auto: false };
   priorityQueue.push(trackInfo);
 
-  // Compléter
   const missing  = TARGET_QUEUE_LENGTH - priorityQueue.length;
   const autoFill = await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST, missing);
   priorityQueue.push(...autoFill);
@@ -163,6 +163,7 @@ app.post('/add-priority-track', async (req, res) => {
 app.post('/play-priority', async (_req, res) => {
   if (!priorityQueue.length) return res.status(400).json({ error: 'Queue empty' });
   const track = priorityQueue.shift();
+  playedTracks.add(track.uri); // <-- on marque comme joué
   await fetch('https://api.spotify.com/v1/me/player/play', {
     method : 'PUT',
     headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -170,7 +171,6 @@ app.post('/play-priority', async (_req, res) => {
   });
   console.log('▶️ Now playing', track.name, '–', track.artists);
 
-  // Remplir à nouveau
   const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
   if (missing > 0) {
     const autoTracks = await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST, missing);
@@ -190,8 +190,5 @@ app.use(express.static(path.join(__dirname, 'static')));
 app.get('/',    (_req, res) => res.redirect('/player.html'));
 app.get('/guest',(_req, res) => res.redirect('/guest.html'));
 
-/* ------------------------------------------------------------------
-   Boot
-   ----------------------------------------------------------------*/
 app.listen(PORT, () => console.log(`🚀 Server ready on port ${PORT}`));
 setInterval(() => autoFillQueue(false), 20 * 1000);
