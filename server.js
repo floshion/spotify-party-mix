@@ -46,6 +46,17 @@ app.get("/token", (req, res) => {
 });
 
 // ====================
+// ROUTES HTML
+// ====================
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "static", "player.html"));
+});
+
+app.get("/guest", (req, res) => {
+  res.sendFile(path.join(__dirname, "static", "guest.html"));
+});
+
+// ====================
 // GESTION FILE PRIORITAIRE
 // ====================
 app.get("/priority-queue", (req, res) => {
