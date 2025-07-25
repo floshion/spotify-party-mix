@@ -20,7 +20,7 @@ const TARGET_QUEUE_LENGTH  = 6;
 
 let priorityQueue = [];     
 let playedTracks  = new Set(); 
-let lastPlaylistTotal = 0; // <-- mémorise le total connu pour détecter des ajouts
+let lastPlaylistTotal = 0; // pour détecter des ajouts
 
 /* ------------------------------------------------------------------
    Auth helpers
@@ -45,7 +45,7 @@ await refreshAccessToken();
 setInterval(refreshAccessToken, 50 * 60 * 1000);
 
 /* ------------------------------------------------------------------
-   Purge de la file : retirer les morceaux déjà joués
+   Purge et dédoublonnage de la file
    ----------------------------------------------------------------*/
 function purgeQueue() {
   const before = priorityQueue.length;
@@ -54,6 +54,18 @@ function purgeQueue() {
   if (before !== after) {
     console.log(`🧹 Purge: ${before - after} morceaux supprimés de la file`);
   }
+}
+
+function deduplicateQueue() {
+  const seen = new Set();
+  const before = priorityQueue.length;
+  priorityQueue = priorityQueue.filter(track => {
+    if (seen.has(track.uri)) return false;
+    seen.add(track.uri);
+    return true;
+  });
+  const after = priorityQueue.length;
+  if (before !== after) console.log(`🧹 Queue dédoublonnée: ${before - after} doublons supprimés`);
 }
 
 /* ------------------------------------------------------------------
@@ -67,14 +79,13 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
   if (!metaRes.ok) return [];
   const total = (await metaRes.json()).tracks.total;
 
-  // Détection de nouveaux morceaux
+  // Détection de nouveaux morceaux (on ne reset pas playedTracks)
   if (total > lastPlaylistTotal) {
     console.log("🎉 Nouveaux morceaux détectés dans la playlist !");
-    playedTracks = new Set(); // reset, on repart à zéro pour inclure les nouveaux
   }
   lastPlaylistTotal = total;
 
-  // Si tout est joué (et aucun nouveau titre), on arrête
+  // Si tout est joué → stop
   if (playedTracks.size >= total) {
     console.log("⚠️ Tous les morceaux disponibles ont été joués.");
     return [];
@@ -113,11 +124,13 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
 async function autoFillQueue (forcePlay = false) {
   await refreshAccessToken();
   purgeQueue();
+  deduplicateQueue();
 
   const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
   if (missing > 0) {
     const randoms = await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST, missing);
     priorityQueue.push(...randoms);
+    deduplicateQueue();
   }
 
   if (forcePlay && priorityQueue.length) {
@@ -133,7 +146,7 @@ async function autoFillQueue (forcePlay = false) {
 }
 
 /* ------------------------------------------------------------------
-   Polling : suivre le morceau actuellement joué (pour l'ajouter à playedTracks)
+   Polling : suivre le morceau actuellement joué
    ----------------------------------------------------------------*/
 async function pollCurrentTrack() {
   if (!access_token) return;
@@ -148,6 +161,7 @@ async function pollCurrentTrack() {
       playedTracks.add(currentUri);
       console.log('🎵 Ajouté aux joués:', data.item.name);
       purgeQueue();
+      deduplicateQueue();
       await autoFillQueue(false);
     }
   } catch (e) {
@@ -206,6 +220,7 @@ app.post('/add-priority-track', async (req, res) => {
   const missing  = TARGET_QUEUE_LENGTH - priorityQueue.length;
   const autoFill = await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST, missing);
   priorityQueue.push(...autoFill);
+  deduplicateQueue();
 
   res.json({ message: 'Track added + auto-fill', track: trackInfo, auto: autoFill });
 });
@@ -225,6 +240,7 @@ app.post('/play-priority', async (_req, res) => {
   if (missing > 0) {
     const autoTracks = await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST, missing);
     priorityQueue.push(...autoTracks);
+    deduplicateQueue();
   }
   res.json({ message: 'Playing next track', track });
 });
