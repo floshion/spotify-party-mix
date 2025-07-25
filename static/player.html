@@ -84,7 +84,7 @@
         const img = document.createElement("img");
         img.src = track.image;
         const span = document.createElement("span");
-        span.textContent = `${track.name} – ${track.artists}`;
+        span.textContent = `${track.name} – ${track.artists}` + (track.auto ? " (Auto)" : "");
         li.appendChild(img); li.appendChild(span);
         list.appendChild(li);
       });
