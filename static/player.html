@@ -102,7 +102,7 @@
       return `${m}:${s}`;
     }
 
-    // --- Nouvelle fonction : Activer crossfade natif Spotify ---
+    // --- Activer crossfade natif Spotify ---
     async function enableCrossfade(duration = 5000) {
       const tokenRes = await fetch('/token');
       const { access_token } = await tokenRes.json();
@@ -137,7 +137,7 @@
             document.getElementById('nextBtn').disabled      = false;
             updatePriorityQueue();
 
-            // Active le crossfade 5s une fois que le player est prêt
+            // Active le crossfade 5s
             enableCrossfade(5000);
           });
 
@@ -164,6 +164,12 @@
             document.getElementById('totalTime').textContent   = formatTime(duration);
 
             updatePriorityQueue();
+
+            // --- Auto-next : si le morceau est fini, on passe au suivant ---
+            if (state.position === 0 && state.paused && state.track_window.previous_tracks.length) {
+              console.log('⏭ Passage auto au prochain titre');
+              fetch('/play-priority', { method: 'POST' }).then(() => updatePriorityQueue());
+            }
           });
 
           player.connect();
