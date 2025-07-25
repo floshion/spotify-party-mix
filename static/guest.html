@@ -42,6 +42,22 @@
     .result strong { font-size: 16px; display: block; }
     .result span { font-size: 14px; color: #aaa; }
     .close-btn { background: none; border: none; color: #fff; font-size: 20px; position: absolute; right: 15px; top: 15px; cursor: pointer; }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(40,40,40,0.95);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 25px;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 3000;
+    }
   </style>
 </head>
 <body>
@@ -80,6 +96,9 @@
     </div>
     <div class="modal-results" id="results"></div>
   </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
 
   <script>
     async function getToken() {
@@ -139,9 +158,8 @@
 
     async function addTrackToPriority(uri) {
       await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
-      alert("Morceau ajouté !");
+      showToast("Morceau ajouté !");
       updateQueue();
-      // Fermer modal + reset
       closeModal();
     }
 
@@ -182,6 +200,13 @@
         resultsDiv.appendChild(div);
       });
     });
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.style.opacity = '1';
+      setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+    }
 
     function formatTime(ms) {
       const minutes = Math.floor(ms / 60000);
