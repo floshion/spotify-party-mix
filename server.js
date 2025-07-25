@@ -43,8 +43,6 @@ app.get('/callback', async (req, res) => {
   refresh_token = data.refresh_token;
 
   if (!access_token) return res.status(500).send("Impossible d'obtenir un token Spotify.");
-
-  // Init seed sur le morceau actuel
   await initSeedTrack();
   res.redirect('/player.html');
 });
@@ -70,7 +68,7 @@ app.get('/token', async (req, res) => {
   res.json({ access_token });
 });
 
-// --- Fonction pour init le seed track au démarrage ---
+// --- Init seed sur morceau actuel ---
 async function initSeedTrack() {
   try {
     const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
@@ -109,7 +107,7 @@ app.post('/add-priority-track', async (req, res) => {
     auto: false
   };
   priorityQueue.push(trackInfo);
-  lastSeedTrack = track.id; // Met à jour le seed
+  lastSeedTrack = track.id;
   res.json({ message: "Track added to priority queue", track: trackInfo });
 });
 
@@ -117,7 +115,7 @@ app.post('/add-priority-track', async (req, res) => {
 app.post('/play-priority', async (req, res) => {
   if (priorityQueue.length === 0) return res.status(400).json({ error: "Priority queue is empty" });
   const track = priorityQueue.shift();
-  lastSeedTrack = track.uri.split(":").pop(); // Met à jour le seed sur la piste lue
+  lastSeedTrack = track.uri.split(":").pop();
   await fetch('https://api.spotify.com/v1/me/player/play', {
     method: 'PUT',
     headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -131,56 +129,74 @@ app.get('/priority-queue', (req, res) => {
   res.json({ queue: priorityQueue });
 });
 
+// --- Forcer DJ Auto ---
+app.post('/force-auto-fill', async (req, res) => {
+  await autoFillQueue(true);
+  res.json({ message: "Auto-fill forcé" });
+});
+
 // --- Auto-fill queue ---
-async function autoFillQueue() {
-  if (!lastSeedTrack) {
-    await initSeedTrack();
-    if (!lastSeedTrack) return;
-  }
+async function autoFillQueue(forcePlay = false) {
+  try {
+    if (!lastSeedTrack) {
+      await initSeedTrack();
+      if (!lastSeedTrack) {
+        console.log("Pas de seed disponible pour recommandations.");
+        return;
+      }
+    }
 
-  if (priorityQueue.length > 0) return;
+    if (priorityQueue.length > 0 && !forcePlay) return;
 
-  const recRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&seed_tracks=${lastSeedTrack}`, {
-    headers: { 'Authorization': 'Bearer ' + access_token }
-  });
-  const recData = await recRes.json();
-
-  if (recData.error) {
-    console.error("Erreur Spotify recommendations :", recData.error);
-    return;
-  }
-
-  if (recData.tracks && recData.tracks.length > 0) {
-    const newTracks = recData.tracks.map(track => ({
-      uri: track.uri,
-      name: track.name,
-      artists: track.artists.map(a => a.name).join(', '),
-      image: track.album.images[0]?.url || '',
-      auto: true
-    }));
-    priorityQueue.push(...newTracks);
-    console.log("Auto-fill : ajout de recommandations");
-
-    // Si rien ne joue actuellement → on lance direct le 1er auto-track
-    const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
+    const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
+    const recRes = await fetch(url, {
       headers: { 'Authorization': 'Bearer ' + access_token }
     });
-    const playingData = await playingRes.json();
-    if (!playingData.is_playing) {
-      const firstTrack = priorityQueue.shift();
-      lastSeedTrack = firstTrack.uri.split(":").pop();
-      await fetch('https://api.spotify.com/v1/me/player/play', {
-        method: 'PUT',
-        headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uris: [firstTrack.uri] })
+    const recData = await recRes.json();
+    console.log("DEBUG recommendations:", recData);
+
+    if ((!recData.tracks || recData.tracks.length === 0)) {
+      console.log("Aucune reco trouvée, fallback sur genre reggaeton.");
+      const fallbackRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_genres=reggaeton`, {
+        headers: { 'Authorization': 'Bearer ' + access_token }
       });
-      console.log("Lecture auto démarrée :", firstTrack.name);
+      const fallbackData = await fallbackRes.json();
+      recData.tracks = fallbackData.tracks || [];
     }
+
+    if (recData.tracks && recData.tracks.length > 0) {
+      const newTracks = recData.tracks.map(track => ({
+        uri: track.uri,
+        name: track.name,
+        artists: track.artists.map(a => a.name).join(', '),
+        image: track.album.images[0]?.url || '',
+        auto: true
+      }));
+      priorityQueue.push(...newTracks);
+      console.log("Auto-fill : ajout de recommandations");
+
+      const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
+        headers: { 'Authorization': 'Bearer ' + access_token }
+      });
+      const playingData = await playingRes.json();
+      if (!playingData.is_playing || forcePlay) {
+        const firstTrack = priorityQueue.shift();
+        lastSeedTrack = firstTrack.uri.split(":").pop();
+        await fetch('https://api.spotify.com/v1/me/player/play', {
+          method: 'PUT',
+          headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uris: [firstTrack.uri] })
+        });
+        console.log("Lecture auto démarrée :", firstTrack.name);
+      }
+    }
+  } catch (err) {
+    console.error("Erreur autoFillQueue:", err);
   }
 }
 
-// Tâche récurrente : vérifie toutes les 30s
-setInterval(autoFillQueue, 30000);
+// Vérification toutes les 5s
+setInterval(autoFillQueue, 5000);
 
 // --- Fichiers statiques ---
 const __filename = fileURLToPath(import.meta.url);
