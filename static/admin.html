@@ -86,7 +86,7 @@
           Connecte‑toi à ton compte Spotify Premium pour contrôler la lecture.
           Les invités n'ont pas besoin de compte Spotify.
         </p>
-        <button id="login-btn" class="btn-play">Se connecter à Spotify</button>
+        <button id="login-button">Se connecter à Spotify</button>
       </div>
       <div class="panel">
         <h2>Lecture en cours</h2>
@@ -330,5 +330,18 @@
         setInterval(fetchCurrentAndQueue, 5000);
       });
     </script>
+    <script>
+  const clientId = "c785d51978c7481fb05c6781cea3e9fa"; // Ton Client ID Spotify
+  const redirectUri = window.location.origin + "/callback"; // Redirection propre
+
+  function loginWithSpotify() {
+    const scope = "streaming user-read-playback-state user-modify-playback-state";
+    const url = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+    window.location.href = url;
+  }
+
+  document.getElementById("login-button").addEventListener("click", loginWithSpotify);
+</script>
+
   </body>
 </html>
