@@ -14,9 +14,11 @@ const redirect_uri = process.env.REDIRECT_URI;
 
 let access_token = null;
 let refresh_token = null;
-let priorityQueue = []; // [{ uri, name, artists, image }]
+let priorityQueue = []; // [{ uri, name, artists, image, auto }]
 
-// --- Authentification Spotify ---
+let lastSeedTrack = null; // dernier morceau ajouté ou joué
+
+// --- Auth Spotify ---
 app.get('/login', (req, res) => {
   const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
   const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=code&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scope)}`;
@@ -66,7 +68,7 @@ app.get('/token', async (req, res) => {
   res.json({ access_token });
 });
 
-// --- File prioritaire enrichie ---
+// --- Ajout musique prioritaire ---
 app.post('/add-priority-track', async (req, res) => {
   const uri = req.query.uri;
   if (!uri) return res.status(400).json({ error: "No URI provided" });
@@ -83,19 +85,19 @@ app.post('/add-priority-track', async (req, res) => {
     uri: uri,
     name: track.name,
     artists: track.artists.map(a => a.name).join(', '),
-    image: track.album.images[0]?.url || ''
+    image: track.album.images[0]?.url || '',
+    auto: false
   };
   priorityQueue.push(trackInfo);
+  lastSeedTrack = track.id; // Met à jour le seed
   res.json({ message: "Track added to priority queue", track: trackInfo });
 });
 
-app.get('/priority-queue', (req, res) => {
-  res.json({ queue: priorityQueue });
-});
-
+// --- Lecture musique prioritaire ---
 app.post('/play-priority', async (req, res) => {
   if (priorityQueue.length === 0) return res.status(400).json({ error: "Priority queue is empty" });
   const track = priorityQueue.shift();
+  lastSeedTrack = track.uri.split(":").pop(); // Met à jour le seed sur la piste lue
   await fetch('https://api.spotify.com/v1/me/player/play', {
     method: 'PUT',
     headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -103,6 +105,38 @@ app.post('/play-priority', async (req, res) => {
   });
   res.json({ message: "Playing priority track", track });
 });
+
+// --- Voir la file ---
+app.get('/priority-queue', (req, res) => {
+  res.json({ queue: priorityQueue });
+});
+
+// --- Auto-fill queue ---
+async function autoFillQueue() {
+  if (!lastSeedTrack) return;
+  if (priorityQueue.length > 0) return;
+
+  const recRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&seed_tracks=${lastSeedTrack}`, {
+    headers: { 'Authorization': 'Bearer ' + access_token }
+  });
+  const recData = await recRes.json();
+
+  if (recData.tracks && recData.tracks.length > 0) {
+    recData.tracks.forEach(track => {
+      priorityQueue.push({
+        uri: track.uri,
+        name: track.name,
+        artists: track.artists.map(a => a.name).join(', '),
+        image: track.album.images[0]?.url || '',
+        auto: true
+      });
+    });
+    console.log("Auto-fill : ajout de recommandations");
+  }
+}
+
+// Tâche récurrente : vérifie toutes les 30s
+setInterval(autoFillQueue, 30000);
 
 // --- Fichiers statiques ---
 const __filename = fileURLToPath(import.meta.url);
