@@ -1,4 +1,3 @@
-// server.js – DJ Auto-mix (random tracks from playlist 1g39kHQqy4XHxGGftDiUWb)
 import express from 'express';
 import fetch   from 'node-fetch';
 import dotenv  from 'dotenv';
@@ -45,6 +44,18 @@ await refreshAccessToken();
 setInterval(refreshAccessToken, 50 * 60 * 1000);
 
 /* ------------------------------------------------------------------
+   Purge de la file : retirer les morceaux déjà joués
+   ----------------------------------------------------------------*/
+function purgeQueue() {
+  const before = priorityQueue.length;
+  priorityQueue = priorityQueue.filter(track => !playedTracks.has(track.uri));
+  const after = priorityQueue.length;
+  if (before !== after) {
+    console.log(`🧹 Purge: ${before - after} morceaux supprimés de la file`);
+  }
+}
+
+/* ------------------------------------------------------------------
    Utils : piocher des titres aléatoires dans une playlist
    ----------------------------------------------------------------*/
 async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
@@ -54,6 +65,11 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
   const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}?fields=tracks(total)&market=FR`, { headers });
   if (!metaRes.ok) return [];
   const total = (await metaRes.json()).tracks.total;
+
+  if (playedTracks.size >= total) {
+    console.log("⚠️ Tous les morceaux de la playlist ont été joués.");
+    return []; // plus rien de dispo
+  }
 
   const taken   = new Set();
   const results = [];
@@ -87,6 +103,8 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
    ----------------------------------------------------------------*/
 async function autoFillQueue (forcePlay = false) {
   await refreshAccessToken();
+  purgeQueue(); // <-- nettoyage avant remplissage
+
   const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
   if (missing > 0) {
     const randoms = await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST, missing);
@@ -120,6 +138,8 @@ async function pollCurrentTrack() {
     if (currentUri && !playedTracks.has(currentUri)) {
       playedTracks.add(currentUri);
       console.log('🎵 Ajouté aux joués:', data.item.name);
+      purgeQueue();
+      await autoFillQueue(false);
     }
   } catch (e) {
     console.error('Erreur poll track:', e.message);
@@ -161,7 +181,6 @@ app.post('/add-priority-track', async (req, res) => {
   const uri = req.query.uri;
   if (!uri) return res.status(400).json({ error: 'No URI provided' });
 
-  // <-- On refuse si déjà joué
   if (playedTracks.has(uri)) {
     return res.status(400).json({ error: 'Track already played' });
   }
@@ -185,7 +204,7 @@ app.post('/add-priority-track', async (req, res) => {
 app.post('/play-priority', async (_req, res) => {
   if (!priorityQueue.length) return res.status(400).json({ error: 'Queue empty' });
   const track = priorityQueue.shift();
-  playedTracks.add(track.uri); // <-- on marque comme joué
+  playedTracks.add(track.uri);
   await fetch('https://api.spotify.com/v1/me/player/play', {
     method : 'PUT',
     headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -203,7 +222,6 @@ app.post('/play-priority', async (_req, res) => {
 
 app.get('/priority-queue', (_req, res) => res.json({ queue: priorityQueue }));
 
-// DEBUG : voir les morceaux déjà joués
 app.get('/played-tracks', (_req, res) => res.json({ played: Array.from(playedTracks) }));
 
 /* ------------------------------------------------------------------
