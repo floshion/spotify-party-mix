@@ -19,9 +19,6 @@ const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 let priorityQueue = [];
 let currentPlaylist = null;
 
-// ====================
-// AUTH SPOTIFY
-// ====================
 async function refreshAccessToken() {
   const res = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
@@ -41,96 +38,50 @@ async function refreshAccessToken() {
 await refreshAccessToken();
 setInterval(refreshAccessToken, 50 * 60 * 1000);
 
-app.get("/token", (req, res) => {
-  res.json({ access_token: accessToken });
-});
+app.get("/token", (req, res) => res.json({ access_token: accessToken }));
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "static", "player.html")));
+app.get("/guest", (req, res) => res.sendFile(path.join(__dirname, "static", "guest.html")));
 
-// ====================
-// ROUTES HTML
-// ====================
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "static", "player.html"));
-});
-
-app.get("/guest", (req, res) => {
-  res.sendFile(path.join(__dirname, "static", "guest.html"));
-});
-
-// ====================
-// GESTION FILE PRIORITAIRE
-// ====================
-app.get("/priority-queue", (req, res) => {
-  res.json({ queue: priorityQueue });
-});
+app.get("/priority-queue", (req, res) => res.json({ queue: priorityQueue }));
 
 app.post("/add-priority-track", async (req, res) => {
   const trackUri = req.query.uri;
   if (!trackUri) return res.status(400).json({ error: "Missing uri" });
-
-  // Récupérer infos morceau
   const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${trackUri.split(":").pop()}`, {
     headers: { "Authorization": `Bearer ${accessToken}` }
   });
   const track = await trackRes.json();
-
   priorityQueue.push({
     uri: track.uri,
     name: track.name,
     artists: track.artists.map(a => a.name).join(", "),
     image: track.album.images[0]?.url
   });
-
   console.log("🎵 Ajouté à la file prioritaire:", track.name);
   res.json({ success: true });
 });
 
-// ====================
-// LIRE PROCHAINE PRIORITÉ
-// ====================
-app.post("/play-priority", async (req, res) => {
-  if (priorityQueue.length === 0) {
-    return res.json({ success: false, message: "Queue vide" });
-  }
-
-  const nextTrack = priorityQueue.shift();
-  await fetch("https://api.spotify.com/v1/me/player/play", {
-    method: "PUT",
-    headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ uris: [nextTrack.uri] })
-  });
-
-  console.log("▶️ Lecture priorité:", nextTrack.name);
-  res.json({ success: true });
-});
-
-// ====================
-// SÉLECTION DE PLAYLIST
-// ====================
+// Définir la playlist
 app.post("/set-playlist", (req, res) => {
   currentPlaylist = req.body.uri;
   console.log("🎶 Playlist de fond définie:", currentPlaylist);
   res.json({ success: true });
 });
 
-// ====================
-// DÉTECTER FIN DE LECTURE
-// ====================
+// Lire le prochain morceau (priorité ou playlist)
 async function autoFillPlayback() {
   const res = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
     headers: { "Authorization": `Bearer ${accessToken}` }
   });
-
   if (res.status !== 200) return;
   const data = await res.json();
   if (!data || !data.item) return;
 
   const progress = data.progress_ms;
   const duration = data.item.duration_ms;
-
-  // Si morceau terminé
   if (progress >= duration - 2000) {
     if (priorityQueue.length > 0) {
-      console.log("⏭ Passage à un titre prioritaire");
+      console.log("▶️ Lecture d'un titre prioritaire");
       await playNextPriority();
     } else if (currentPlaylist) {
       console.log("⏯ Retour à la playlist");
@@ -152,10 +103,6 @@ async function playNextPriority() {
   });
 }
 
-// Vérification toutes les 5s
 setInterval(autoFillPlayback, 5000);
 
-// ====================
-// SERVER
-// ====================
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
