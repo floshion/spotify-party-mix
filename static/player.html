@@ -44,7 +44,7 @@
     <!-- Player -->
     <div class="track-container">
       <img id="albumArt" src="" alt="Album cover">
-      <h2 id="trackName">Cliquez sur \"Démarrer\"…</h2>
+      <h2 id="trackName">Cliquez sur 'Démarrer'…</h2>
       <p id="artistName"></p>
       <div class="progress-container">
         <div class="progress-bar" id="progressBar"></div>
@@ -63,18 +63,25 @@
 
     <!-- File invités -->
     <div class="queue-container">
-      <h3>Morceaux invités à venir :</h3>
+      <h3>Morceaux à venir :</h3>
       <ul id="priorityQueueList"></ul>
     </div>
   </div>
 
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
+    // Génération du QR Code
+    const guestUrl = window.location.origin + "/guest.html";
+    new QRCode(document.getElementById("qrcode"), { text: guestUrl, width: 200, height: 200, colorDark : "#ffffff", colorLight : "#111111", correctLevel : QRCode.CorrectLevel.H });
+
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
       if (!data.access_token) {
-        document.getElementById(\"errorMsg\").textContent = \"Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.\";
-        throw new Error(\"Token invalide\");
+        document.getElementById("errorMsg").textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
+        throw new Error("Token invalide");
       }
       return data.access_token;
     }
@@ -82,14 +89,14 @@
     async function updatePriorityQueue() {
       const res = await fetch('/priority-queue');
       const data = await res.json();
-      const list = document.getElementById(\"priorityQueueList\");
-      list.innerHTML = \"\";
+      const list = document.getElementById("priorityQueueList");
+      list.innerHTML = "";
       data.queue.forEach(track => {
-        const li = document.createElement(\"li\");
-        const img = document.createElement(\"img\");
+        const li = document.createElement("li");
+        const img = document.createElement("img");
         img.src = track.image;
-        const span = document.createElement(\"span\");
-        span.textContent = `${track.name} – ${track.artists}` + (track.auto ? \" (Auto)\" : \"\");
+        const span = document.createElement("span");
+        span.textContent = `${track.name} – ${track.artists}` + (track.auto ? " (Auto)" : "");
         li.appendChild(img); li.appendChild(span);
         list.appendChild(li);
       });
@@ -97,48 +104,42 @@
 
     let player;
     window.onSpotifyWebPlaybackSDKReady = () => {
-      document.getElementById(\"startBtn\").addEventListener(\"click\", async () => {
+      document.getElementById("startBtn").addEventListener("click", async () => {
         try {
           const token = await getToken();
           player = new Spotify.Player({ name: 'DJ Player', getOAuthToken: cb => { cb(token); }, volume: 1.0 });
 
           player.addListener('ready', ({ device_id }) => {
-            fetch(\"https://api.spotify.com/v1/me/player/play?device_id=\" + device_id, {
-              method: \"PUT\",
+            fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
+              method: "PUT",
               headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ context_uri: \"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M\" })
+              body: JSON.stringify({ context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" })
             });
-            document.getElementById(\"playPauseBtn\").disabled = false;
-            document.getElementById(\"nextBtn\").disabled = false;
+            document.getElementById("playPauseBtn").disabled = false;
+            document.getElementById("nextBtn").disabled = false;
             updatePriorityQueue();
           });
-
-          player.addListener('initialization_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur init : \" + message);
-          player.addListener('authentication_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur auth : \" + message);
-          player.addListener('account_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur compte : \" + message);
-          player.addListener('playback_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur lecture : \" + message);
 
           player.addListener('player_state_changed', state => {
             if (!state) return;
             const track = state.track_window.current_track;
-            document.getElementById(\"albumArt\").src = track.album.images[0].url;
-            document.getElementById(\"trackName\").textContent = track.name;
-            document.getElementById(\"artistName\").textContent = track.artists.map(a => a.name).join(', ');
+            document.getElementById("albumArt").src = track.album.images[0].url;
+            document.getElementById("trackName").textContent = track.name;
+            document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
 
-            // Progression
             const position = state.position;
             const duration = state.duration;
-            document.getElementById(\"progressBar\").style.width = ((position / duration) * 100) + \"%\";
-            document.getElementById(\"currentTime\").textContent = formatTime(position);
-            document.getElementById(\"totalTime\").textContent = formatTime(duration);
+            document.getElementById("progressBar").style.width = ((position / duration) * 100) + "%";
+            document.getElementById("currentTime").textContent = formatTime(position);
+            document.getElementById("totalTime").textContent = formatTime(duration);
 
             updatePriorityQueue();
           });
 
           player.connect();
-          document.getElementById(\"playPauseBtn\").onclick = () => player.togglePlay();
-          document.getElementById(\"nextBtn\").onclick = async () => { await fetch('/play-priority', { method: \"POST\" }); updatePriorityQueue(); };
-          document.getElementById(\"startBtn\").style.display = \"none\";
+          document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
+          document.getElementById("nextBtn").onclick = async () => { await fetch('/play-priority', { method: "POST" }); updatePriorityQueue(); };
+          document.getElementById("startBtn").style.display = "none";
         } catch (e) { console.error(e); }
       });
     };
@@ -148,12 +149,6 @@
       const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
       return `${minutes}:${seconds}`;
     }
-  </script>
-  <script src=\"https://sdk.scdn.co/spotify-player.js\"></script>
-  <script src=\"https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js\"></script>
-  <script>
-    const guestUrl = window.location.origin + \"/guest.html\";
-    new QRCode(document.getElementById(\"qrcode\"), { text: guestUrl, width: 200, height: 200, colorDark : \"#ffffff\", colorLight : \"#111111\", correctLevel : QRCode.CorrectLevel.H });
   </script>
 </body>
 </html>
