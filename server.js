@@ -20,7 +20,7 @@ let lastSeedInfo = { title: "Inconnu", artist: "" };
 
 const FALLBACK_PLAYLIST = "37i9dQZF1DXcBWIGoYBM5M"; // Top 50 France
 
-// --- Rafraîchir l'access_token à partir du refresh_token
+// --- Rafraîchir l'access_token
 async function refreshAccessToken() {
     if (!refresh_token) {
         console.log("❌ Aucun refresh_token trouvé. Connecte-toi via /login.");
@@ -48,8 +48,6 @@ async function refreshAccessToken() {
         console.error("❌ Erreur lors du refresh token :", err);
     }
 }
-
-// Rafraîchir automatiquement toutes les 50 minutes
 setInterval(refreshAccessToken, 50 * 60 * 1000);
 
 // --- Login Spotify (1ère fois uniquement)
@@ -83,7 +81,7 @@ app.get('/callback', async (req, res) => {
     res.send("Connexion réussie ! Va coller le refresh_token dans Render (SPOTIFY_REFRESH_TOKEN), puis redéploie.");
 });
 
-// --- Endpoint pour le player : retourne toujours un token valide
+// --- Endpoint token (toujours valide)
 app.get('/token', async (req, res) => {
     if (!access_token) await refreshAccessToken();
     if (!access_token) return res.status(401).json({ error: 'Not authenticated' });
@@ -186,7 +184,7 @@ async function autoFillQueue(forcePlay = false) {
 
         const isValid = await validateTrack(lastSeedTrack);
         if (!isValid) {
-            console.log(`⚠️ Seed ${lastSeedTrack} invalide → fallback Top 50`);
+            console.log(`⚠️ Seed ${lastSeedTrack} invalide → remplacement par Top 50`);
             const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=1&market=FR`, {
                 headers: { 'Authorization': 'Bearer ' + access_token }
             });
@@ -207,21 +205,23 @@ async function autoFillQueue(forcePlay = false) {
             const recRes = await fetch(url, { headers: { 'Authorization': 'Bearer ' + access_token } });
 
             if (!recRes.ok) {
-                const errText = await recRes.text();
-                console.error(`❌ Erreur Spotify (${recRes.status}) : ${errText}`);
-                console.log("➡️ Fallback : ajout direct depuis Top 50");
-                const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=3`, {
+                console.error(`❌ Erreur Spotify (${recRes.status}) → utilisation du Top 50`);
+                const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=3&market=FR`, {
                     headers: { 'Authorization': 'Bearer ' + access_token }
                 });
                 const playlistData = await playlistRes.json();
-                if (playlistData.items) {
-                    priorityQueue.push(...playlistData.items.map(item => ({
+                if (playlistData.items && playlistData.items.length > 0) {
+                    const fallbackTracks = playlistData.items.map(item => ({
                         uri: item.track.uri,
                         name: item.track.name,
                         artists: item.track.artists.map(a => a.name).join(', '),
                         image: item.track.album.images[0]?.url || '',
                         auto: true
-                    })));
+                    }));
+                    priorityQueue.push(...fallbackTracks);
+                    lastSeedTrack = playlistData.items[0].track.id;
+                    lastSeedInfo = { title: playlistData.items[0].track.name, artist: playlistData.items[0].track.artists.map(a => a.name).join(', ') };
+                    console.log(`➡️ Fallback : ${fallbackTracks.length} morceaux ajoutés depuis Top 50`);
                 }
                 return;
             }
