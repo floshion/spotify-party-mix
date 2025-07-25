@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>DJ Player</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { background: #111; color: white; font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin:0; }
+    .track { text-align: center; margin-bottom: 20px; }
+    .track img { width: 300px; height: 300px; border-radius: 10px; }
+    .controls { display: flex; gap: 20px; margin-top: 20px; }
+    .btn { background: #1DB954; border: none; padding: 15px 25px; border-radius: 30px; font-size: 20px; cursor: pointer; }
+    .btn:hover { background: #1ed760; }
+  </style>
+</head>
+<body>
+  <div class="track">
+    <img id="albumArt" src="" alt="Album cover">
+    <h2 id="trackName">Chargement...</h2>
+    <p id="artistName"></p>
+  </div>
+  <div class="controls">
+    <button class="btn" id="playPauseBtn">⏯</button>
+    <button class="btn" id="nextBtn">⏭</button>
+  </div>
+
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+    const token = new URLSearchParams(window.location.search).get("token");
+    let player;
+
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      player = new Spotify.Player({
+        name: 'DJ Player',
+        getOAuthToken: cb => { cb(token); },
+        volume: 1.0
+      });
+
+      // Ready
+      player.addListener('ready', ({ device_id }) => {
+        console.log('Ready with Device ID', device_id);
+        // On transfère la lecture vers ce player
+        fetch("https://api.spotify.com/v1/me/player", {
+          method: "PUT",
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_ids: [device_id], play: true })
+        });
+      });
+
+      // Track changed
+      player.addListener('player_state_changed', state => {
+        if (!state) return;
+        const track = state.track_window.current_track;
+        document.getElementById("albumArt").src = track.album.images[0].url;
+        document.getElementById("trackName").textContent = track.name;
+        document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
+      });
+
+      player.connect();
+
+      // Controls
+      document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
+      document.getElementById("nextBtn").onclick = () => player.nextTrack();
+    };
+  </script>
+</body>
+</html>
