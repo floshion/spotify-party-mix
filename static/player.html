@@ -52,6 +52,7 @@
         <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
       </div>
       <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
+      <button class="btn" id="openDisplayBtn">📺 Mode TV</button>
       <p id="errorMsg"></p>
     </div>
 
@@ -156,6 +157,9 @@
           document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
           document.getElementById('nextBtn').onclick      = async () => { await fetch('/play-priority', { method:'POST' }); updatePriorityQueue(); };
           document.getElementById('startBtn').style.display='none';
+          document.getElementById('openDisplayBtn').addEventListener('click', () => {
+  window.open('/display.html', '_blank');
+});
         }catch(e){ console.error(e); }
       });
     };
