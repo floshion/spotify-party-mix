@@ -156,50 +156,49 @@ async function autoFillQueue(forcePlay = false) {
       }
     }
 
-    if (priorityQueue.length > 0 && !forcePlay) return;
-
-    const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
-    const recRes = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + access_token }
-    });
-    const recData = await recRes.json();
-    console.log("DEBUG recommendations:", recData);
-
-    if ((!recData.tracks || recData.tracks.length === 0)) {
-      console.log("Aucune reco trouvée, fallback sur genre reggaeton.");
-      const fallbackRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_genres=reggaeton`, {
+    if (priorityQueue.length === 0) {  // SI VIDE → RAJOUTE 3 RECO
+      const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
+      const recRes = await fetch(url, {
         headers: { 'Authorization': 'Bearer ' + access_token }
       });
-      const fallbackData = await fallbackRes.json();
-      recData.tracks = fallbackData.tracks || [];
+      const recData = await recRes.json();
+
+      if ((!recData.tracks || recData.tracks.length === 0)) {
+        console.log("Aucune reco trouvée, fallback sur genre pop.");
+        const fallbackRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_genres=pop`, {
+          headers: { 'Authorization': 'Bearer ' + access_token }
+        });
+        const fallbackData = await fallbackRes.json();
+        recData.tracks = fallbackData.tracks || [];
+      }
+
+      if (recData.tracks && recData.tracks.length > 0) {
+        const newTracks = recData.tracks.map(track => ({
+          uri: track.uri,
+          name: track.name,
+          artists: track.artists.map(a => a.name).join(', '),
+          image: track.album.images[0]?.url || '',
+          auto: true
+        }));
+        priorityQueue.push(...newTracks);
+        console.log("Auto-fill : ajout de recommandations");
+      }
     }
 
-    if (recData.tracks && recData.tracks.length > 0) {
-      const newTracks = recData.tracks.map(track => ({
-        uri: track.uri,
-        name: track.name,
-        artists: track.artists.map(a => a.name).join(', '),
-        image: track.album.images[0]?.url || '',
-        auto: true
-      }));
-      priorityQueue.push(...newTracks);
-      console.log("Auto-fill : ajout de recommandations");
-
-      const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
-        headers: { 'Authorization': 'Bearer ' + access_token }
+    const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
+      headers: { 'Authorization': 'Bearer ' + access_token }
+    });
+    const playingData = await playingRes.json();
+    if ((!playingData.is_playing || forcePlay) && priorityQueue.length > 0) {
+      const firstTrack = priorityQueue.shift();
+      lastSeedTrack = firstTrack.uri.split(":").pop();
+      lastSeedInfo = { title: firstTrack.name, artist: firstTrack.artists };
+      await fetch('https://api.spotify.com/v1/me/player/play', {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uris: [firstTrack.uri] })
       });
-      const playingData = await playingRes.json();
-      if (!playingData.is_playing || forcePlay) {
-        const firstTrack = priorityQueue.shift();
-        lastSeedTrack = firstTrack.uri.split(":").pop();
-        lastSeedInfo = { title: firstTrack.name, artist: firstTrack.artists };
-        await fetch('https://api.spotify.com/v1/me/player/play', {
-          method: 'PUT',
-          headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uris: [firstTrack.uri] })
-        });
-        console.log("Lecture auto démarrée :", firstTrack.name);
-      }
+      console.log("Lecture auto démarrée :", firstTrack.name);
     }
   } catch (err) {
     console.error("Erreur autoFillQueue:", err);
