@@ -4,48 +4,32 @@
   <meta charset="UTF-8">
   <title>Spotify Party Mix</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }
-    header { width: 100%; padding: 15px; background: #1c1c1e; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #333; }
-    header img { position: absolute; left: 15px; width: 40px; height: 40px; border-radius: 50%; }
-    header h1 { font-size: 20px; margin: 0; }
-    .playlist-selector { margin: 15px 0; display: flex; gap: 10px; align-items: center; }
-    select { padding: 10px; border-radius: 8px; background: #1c1c1e; color: #fff; border: 1px solid #333; font-size: 16px; }
-    .btn { background: #1DB954; border: none; padding: 10px 20px; border-radius: 25px; font-size: 16px; cursor: pointer; transition: 0.3s; }
-    .btn:hover { background: #1ed760; }
-    .main { display: flex; justify-content: space-between; width: 95%; max-width: 1200px; margin-top: 20px; gap: 20px; }
-    .track { flex: 2; display: flex; flex-direction: column; align-items: center; }
-    .track img { width: 320px; height: 320px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.8); }
-    .track h2 { font-size: 28px; margin: 15px 0 5px; }
-    .track p { font-size: 20px; color: #ccc; margin: 0; }
-    .progress-container { width: 80%; max-width: 400px; height: 8px; background: #333; border-radius: 4px; margin-top: 15px; }
-    .progress-bar { height: 100%; background: #1DB954; width: 0%; border-radius: 4px; }
-    .time-info { display: flex; justify-content: space-between; width: 80%; max-width: 400px; font-size: 14px; color: #aaa; margin-top: 5px; }
-    .queue { flex: 1; background: #222; padding: 15px; border-radius: 10px; overflow-y: auto; max-height: 500px; }
-    .queue h3 { text-align: center; margin-bottom: 10px; }
-    #priorityQueueList { list-style: none; padding: 0; }
-    #priorityQueueList li { display: flex; align-items: center; gap: 10px; background: #333; padding: 8px; border-radius: 5px; margin-bottom: 8px; }
-    #priorityQueueList img { width: 50px; height: 50px; border-radius: 5px; }
-    .qr-code { margin-top: 20px; text-align: center; }
-    .qr-code img { width: 150px; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <img src="logo_flo_besset.png" alt="Logo">
-    <h1>Spotify Party Mix</h1>
-  </header>
+  <div id="app">
+    <div class="left-panel">
+      <div class="qr-section">
+        <h3>Invitez vos amis</h3>
+        <p>Scannez pour ajouter vos morceaux</p>
+        <img src="qr_code.png" alt="QR Code">
+      </div>
+      <div class="logo-section">
+        <img src="logo_flo_besset.png" alt="Logo Flo Besset">
+      </div>
+    </div>
 
-  <div class="playlist-selector">
-    <label for="playlistSelect">Choisir une playlist :</label>
-    <select id="playlistSelect"></select>
-    <button class="btn" id="startPlaylistBtn">Lancer</button>
-  </div>
+    <div class="center-panel">
+      <!-- Nouveau bloc pour le menu playlist -->
+      <div class="playlist-selector">
+        <label for="playlistSelect">Choisir une playlist :</label>
+        <select id="playlistSelect"></select>
+        <button id="startPlaylistBtn" class="btn">Lancer</button>
+      </div>
+      <!-- Fin du nouveau bloc -->
 
-  <div class="main">
-    <div class="track">
       <img id="albumArt" src="" alt="Album cover">
-      <h2 id="trackName">Aucun titre</h2>
+      <h2 id="trackName">Cliquez sur "Démarrer"…</h2>
       <p id="artistName"></p>
       <div class="progress-container">
         <div class="progress-bar" id="progressBar"></div>
@@ -54,17 +38,17 @@
         <span id="currentTime">0:00</span>
         <span id="totalTime">0:00</span>
       </div>
+      <div class="controls">
+        <button id="playPauseBtn" class="btn">⏯ Play/Pause</button>
+        <button id="nextBtn" class="btn">⏭ Suivant</button>
+        <button id="startBtn" class="btn">▶️ Démarrer le lecteur</button>
+      </div>
     </div>
 
-    <div class="queue">
-      <h3>Morceaux invités :</h3>
+    <div class="right-panel">
+      <h3>Morceaux invités à venir :</h3>
       <ul id="priorityQueueList"></ul>
     </div>
-  </div>
-
-  <div class="qr-code">
-    <p>Invitez vos amis à ajouter des morceaux :</p>
-    <img src="qr_code.png" alt="QR code">
   </div>
 
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
@@ -72,7 +56,6 @@
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
-      if (!data.access_token) throw new Error("Token invalide");
       return data.access_token;
     }
 
@@ -91,7 +74,7 @@
       list.innerHTML = "";
       data.queue.forEach(track => {
         const li = document.createElement("li");
-        li.innerHTML = `<img src="${track.image}"><span>${track.name} – ${track.artists}</span>`;
+        li.innerHTML = `<img src="${track.image}" alt="cover"><span>${track.name} – ${track.artists}</span>`;
         list.appendChild(li);
       });
     }
@@ -102,9 +85,7 @@
       return `${minutes}:${seconds}`;
     }
 
-    let player;
-    let deviceId = null;
-    let selectedPlaylist = null;
+    let player, deviceId = null, selectedPlaylist = null;
 
     window.onSpotifyWebPlaybackSDKReady = async () => {
       const token = await getToken();
@@ -141,8 +122,18 @@
         document.getElementById("totalTime").textContent = formatTime(state.duration);
       });
 
-      document.getElementById("startPlaylistBtn").addEventListener("click", async () => {
-        if (!selectedPlaylist) return alert("Choisis une playlist !");
+      document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
+      document.getElementById("nextBtn").onclick = async () => { await fetch('/play-priority', { method: "POST" }); updatePriorityQueue(); };
+
+      document.getElementById("startBtn").onclick = async () => {
+        await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+          method: "PUT",
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context_uri: selectedPlaylist })
+        });
+      };
+
+      document.getElementById("startPlaylistBtn").onclick = async () => {
         await fetch('/set-playlist', { 
           method: "POST", 
           headers: { "Content-Type": "application/json" }, 
@@ -153,7 +144,7 @@
           headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
           body: JSON.stringify({ context_uri: selectedPlaylist })
         });
-      });
+      };
 
       player.connect();
       updatePriorityQueue();
