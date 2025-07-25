@@ -34,6 +34,7 @@
     #priorityQueueList { list-style: none; padding: 0; }
     #priorityQueueList li { display: flex; align-items: center; gap: 10px; background: #333; padding: 8px; border-radius: 5px; margin-bottom: 8px; }
     #priorityQueueList img { width: 50px; height: 50px; border-radius: 5px; }
+    .debug { margin-top: 30px; font-size: 14px; color: #888; background: #1c1c1c; padding: 10px; border-radius: 8px; width: 90%; max-width: 800px; }
   </style>
 </head>
 <body>
@@ -56,6 +57,7 @@
         <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
       </div>
       <button class="btn" id="skipPriority">⏩ Passer au prochain invité</button>
+      <button class="btn" id="forceAuto">🎛 Forcer DJ Auto</button>
       <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
     </div>
 
@@ -64,6 +66,13 @@
       <h3>Morceaux invités à venir :</h3>
       <ul id="priorityQueueList"></ul>
     </div>
+  </div>
+
+  <!-- Bloc debug -->
+  <div class="debug">
+    <strong>DEBUG :</strong><br>
+    Seed actuel : <span id="debugSeed">Inconnu</span><br>
+    Taille de la file : <span id="debugQueueSize">0</span>
   </div>
 
   <script>
@@ -79,6 +88,7 @@
       const data = await res.json();
       const list = document.getElementById("priorityQueueList");
       list.innerHTML = "";
+      document.getElementById("debugQueueSize").textContent = data.queue.length;
       data.queue.forEach(track => {
         const li = document.createElement("li");
         const img = document.createElement("img");
@@ -90,9 +100,21 @@
       });
     }
 
+    async function updateDebugSeed() {
+      const res = await fetch('/debug-seed');
+      const data = await res.json();
+      document.getElementById("debugSeed").textContent = data.seed || "Inconnu";
+    }
+
     document.getElementById("skipPriority").addEventListener("click", async () => {
       await fetch('/play-priority', { method: "POST" });
       updatePriorityQueue();
+    });
+
+    document.getElementById("forceAuto").addEventListener("click", async () => {
+      await fetch('/force-auto-fill', { method: "POST" });
+      updatePriorityQueue();
+      updateDebugSeed();
     });
 
     let player;
@@ -110,6 +132,7 @@
           document.getElementById("playPauseBtn").disabled = false;
           document.getElementById("nextBtn").disabled = false;
           updatePriorityQueue();
+          updateDebugSeed();
         });
 
         player.addListener('player_state_changed', state => {
@@ -119,10 +142,10 @@
           document.getElementById("trackName").textContent = track.name;
           document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
           updatePriorityQueue();
+          updateDebugSeed();
         });
 
-        // Refresh auto toutes les 5s
-        setInterval(() => { updatePriorityQueue(); }, 5000);
+        setInterval(() => { updatePriorityQueue(); updateDebugSeed(); }, 5000);
 
         player.connect();
         document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
@@ -134,7 +157,6 @@
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script>
-    // Génération du QR Code
     const guestUrl = window.location.origin + "/guest.html";
     new QRCode(document.getElementById("qrcode"), {
       text: guestUrl,
