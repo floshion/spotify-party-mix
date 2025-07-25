@@ -30,7 +30,8 @@
     .queue-item span { font-size: 14px; color: #aaa; }
 
     /* Modal résultats */
-    .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(13,13,13,0.95); z-index: 2000; display: none; flex-direction: column; }
+    .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(13,13,13,0.95); z-index: 2000; display: none; flex-direction: column; opacity: 0; transition: opacity 0.3s ease; }
+    .modal.show { display: flex; opacity: 1; }
     .modal-header { padding: 10px; }
     .modal-header input { width: 100%; padding: 12px 15px; font-size: 16px; border-radius: 25px; border: none; outline: none; background: #2c2c2e; color: #fff; }
     .modal-results { flex: 1; overflow-y: auto; padding: 10px; }
@@ -140,16 +141,31 @@
       await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
       alert("Morceau ajouté !");
       updateQueue();
+      // Fermer modal + reset
+      closeModal();
+    }
+
+    function openModal() {
+      const modal = document.getElementById("searchModal");
+      document.getElementById("searchInput").value = "";
+      document.getElementById("results").innerHTML = "";
+      modal.classList.add("show");
+    }
+
+    function closeModal() {
+      const modal = document.getElementById("searchModal");
+      modal.classList.remove("show");
+      setTimeout(() => { modal.style.display = "none"; }, 300);
     }
 
     document.getElementById("openSearch").addEventListener("click", () => {
-      document.getElementById("searchModal").style.display = "flex";
+      const modal = document.getElementById("searchModal");
+      modal.style.display = "flex";
+      setTimeout(() => openModal(), 10);
       document.getElementById("searchInput").focus();
     });
 
-    document.getElementById("closeModal").addEventListener("click", () => {
-      document.getElementById("searchModal").style.display = "none";
-    });
+    document.getElementById("closeModal").addEventListener("click", closeModal);
 
     document.getElementById("searchInput").addEventListener("input", async (e) => {
       const query = e.target.value;
@@ -173,7 +189,6 @@
       return `${minutes}:${seconds}`;
     }
 
-    // Boucles de mise à jour
     setInterval(updateNowPlaying, 1000);
     setInterval(updateQueue, 5000);
     updateNowPlaying();
