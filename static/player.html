@@ -119,6 +119,16 @@
             document.getElementById("nextBtn").disabled = false;
             updatePriorityQueue();
           });
+          setInterval(async () => {
+  const state = await player.getCurrentState();
+  if (state && !state.paused) {
+    const position = state.position;
+    const duration = state.duration;
+    document.getElementById("progressBar").style.width = ((position / duration) * 100) + "%";
+    document.getElementById("currentTime").textContent = formatTime(position);
+    document.getElementById("totalTime").textContent = formatTime(duration);
+  }
+}, 1000);
 
           player.addListener('player_state_changed', state => {
             if (!state) return;
