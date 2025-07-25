@@ -16,19 +16,22 @@
     .next { background: #333; }
     .next:hover { background: #444; }
     .status { margin-top: 30px; font-size: 16px; color: #999; }
+    #startBtn { background: #007bff; margin-top: 40px; }
+    #startBtn:hover { background: #0091ff; }
   </style>
 </head>
 <body>
   <div class="track">
     <img id="albumArt" src="" alt="Album cover">
-    <h2 id="trackName">Connexion en cours...</h2>
+    <h2 id="trackName">En attente de démarrage...</h2>
     <p id="artistName"></p>
   </div>
   <div class="controls">
-    <button class="btn" id="playPauseBtn">⏯ Play/Pause</button>
-    <button class="btn next" id="nextBtn">⏭ Suivant</button>
+    <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
+    <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
   </div>
-  <div class="status" id="status">Initialisation du lecteur...</div>
+  <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
+  <div class="status" id="status">Cliquez sur "Démarrer le lecteur" pour initialiser Spotify</div>
 
   <script>
     async function getToken() {
@@ -43,7 +46,9 @@
     }
 
     let player;
-    window.onSpotifyWebPlaybackSDKReady = async () => {
+
+    async function initPlayer() {
+      document.getElementById("status").textContent = "Initialisation...";
       const token = await getToken();
 
       player = new Spotify.Player({
@@ -53,12 +58,15 @@
       });
 
       player.addListener('ready', ({ device_id }) => {
-        document.getElementById("status").textContent = "Lecteur prêt. Device ID: " + device_id;
+        document.getElementById("status").textContent = "Lecteur prêt (Device ID: " + device_id + ")";
+        // Transférer la lecture vers ce player
         fetch("https://api.spotify.com/v1/me/player", {
           method: "PUT",
           headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
           body: JSON.stringify({ device_ids: [device_id], play: true })
         });
+        document.getElementById("playPauseBtn").disabled = false;
+        document.getElementById("nextBtn").disabled = false;
       });
 
       player.addListener('player_state_changed', state => {
@@ -82,7 +90,12 @@
 
       document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
       document.getElementById("nextBtn").onclick = () => player.nextTrack();
-    };
+    }
+
+    document.getElementById("startBtn").addEventListener("click", () => {
+      initPlayer();
+      document.getElementById("startBtn").style.display = "none";
+    });
   </script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
 </body>
