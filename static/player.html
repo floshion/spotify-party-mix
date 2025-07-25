@@ -63,67 +63,100 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
-    // QR Code guest
-    const guestUrl = window.location.origin + '/guest.html';
-    new QRCode(document.getElementById('qrcode'), { text: guestUrl, width:200, height:200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+    // ID fixe de la playlist MUSIQUES
+    const PLAYLIST_ID = '1g39kHQqy4XHxGGftDiUWb';
 
+    // Génération du QR Code guest
+    const guestUrl = window.location.origin + '/guest.html';
+    new QRCode(document.getElementById('qrcode'), { text: guestUrl, width: 200, height: 200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+
+    // Récupérer le token Spotify exposé par le serveur
     async function getToken(){
       const res = await fetch('/token');
-      const data= await res.json();
-      if(!data.access_token){ document.getElementById('errorMsg').textContent="Token manquant"; throw new Error('No token'); }
+      const data = await res.json();
+      if(!data.access_token){
+        document.getElementById('errorMsg').textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
+        throw new Error('Token invalide');
+      }
       return data.access_token;
     }
 
-    async function updateQueue(){
-      const res=await fetch('/priority-queue');
-      const data=await res.json();
-      const list=document.getElementById('priorityQueueList');
-      list.innerHTML='';
-      data.queue.forEach(t=>{
-        const li=document.createElement('li');
-        li.innerHTML=`<img src="${t.image}"><span>${t.name} – ${t.artists}${t.auto?' (Auto)':''}</span>`;
+    // Afficher la file d’attente
+    async function updatePriorityQueue(){
+      const res  = await fetch('/priority-queue');
+      const data = await res.json();
+      const list = document.getElementById('priorityQueueList');
+      list.innerHTML = '';
+      data.queue.forEach(track=>{
+        const li  = document.createElement('li');
+        const img = document.createElement('img');
+        img.src   = track.image;
+        const span= document.createElement('span');
+        span.textContent = `${track.name} – ${track.artists}` + (track.auto?' (Auto)':'');
+        li.appendChild(img); li.appendChild(span);
         list.appendChild(li);
       });
     }
-    setInterval(updateQueue,5000);
+    setInterval(updatePriorityQueue, 5000);
 
-    function fmt(ms){const m=Math.floor(ms/60000);const s=Math.floor((ms%60000)/1000).toString().padStart(2,'0');return `${m}:${s}`;}
+    // Format mm:ss
+    function formatTime(ms){
+      const m = Math.floor(ms/60000);
+      const s = Math.floor((ms%60000)/1000).toString().padStart(2,'0');
+      return `${m}:${s}`;
+    }
 
     let player;
-    window.onSpotifyWebPlaybackSDKReady=()=>{
-      document.getElementById('startBtn').addEventListener('click',async()=>{
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      document.getElementById('startBtn').addEventListener('click', async () => {
         try{
-          const token=await getToken();
-          player=new Spotify.Player({name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1});
+          const token = await getToken();
+          player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
 
-          player.addListener('ready', async ({device_id})=>{
-            // Demande au serveur de démarrer la file prioritaire
-            await fetch('/play-priority',{method:'POST'});
-            document.getElementById('playPauseBtn').disabled=false;
-            document.getElementById('nextBtn').disabled=true; // next manuel passe par /play-priority déjà
-            updateQueue();
+          // Device prêt : on lance la playlist MUSIQUES
+          player.addListener('ready', ({ device_id }) => {
+            fetch(`https://api.spotify.com/v1/me/player/play?device_id=${device_id}`,{
+              method :'PUT',
+              headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+              body   :JSON.stringify({ context_uri:`spotify:playlist:${PLAYLIST_ID}` })
+            });
+            document.getElementById('playPauseBtn').disabled = false;
+            document.getElementById('nextBtn').disabled      = false;
+            updatePriorityQueue();
           });
 
-          player.addListener('player_state_changed',state=>{
+          // Met à jour la barre de progression chaque seconde
+          setInterval(async ()=>{
+            const state = await player.getCurrentState();
+            if(state && !state.paused){
+              const { position, duration } = state;
+              document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
+              document.getElementById('currentTime').textContent = formatTime(position);
+              document.getElementById('totalTime').textContent   = formatTime(duration);
+            }
+          },1000);
+
+          // Changement de piste (ou play/pause)
+          player.addListener('player_state_changed', state => {
             if(!state) return;
-            const track=state.track_window.current_track;
-            document.getElementById('albumArt').src=track.album.images[0].url;
-            document.getElementById('trackName').textContent=track.name;
-            document.getElementById('artistName').textContent=track.artists.map(a=>a.name).join(', ');
+            const track = state.track_window.current_track;
+            document.getElementById('albumArt').src          = track.album.images[0].url;
+            document.getElementById('trackName').textContent = track.name;
+            document.getElementById('artistName').textContent= track.artists.map(a=>a.name).join(', ');
 
-            const {position,duration}=state;
-            document.getElementById('progressBar').style.width=((position/duration)*100)+'%';
-            document.getElementById('currentTime').textContent=fmt(position);
-            document.getElementById('totalTime').textContent=fmt(duration);
+            const { position, duration } = state;
+            document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
+            document.getElementById('currentTime').textContent = formatTime(position);
+            document.getElementById('totalTime').textContent   = formatTime(duration);
+
+            updatePriorityQueue();
           });
-
-          setInterval(async()=>{const s=await player.getCurrentState();if(s&& !s.paused){const {position,duration}=s;document.getElementById('progressBar').style.width=((position/duration)*100)+'%';document.getElementById('currentTime').textContent=fmt(position);document.getElementById('totalTime').textContent=fmt(duration);}},1000);
 
           player.connect();
-          document.getElementById('playPauseBtn').onclick=()=>player.togglePlay();
-          document.getElementById('nextBtn').onclick=async()=>{await fetch('/play-priority',{method:'POST'});updateQueue();};
+          document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
+          document.getElementById('nextBtn').onclick      = async () => { await fetch('/play-priority', { method:'POST' }); updatePriorityQueue(); };
           document.getElementById('startBtn').style.display='none';
-        }catch(e){console.error(e);}
+        }catch(e){ console.error(e); }
       });
     };
   </script>
