@@ -5,7 +5,7 @@
   <title>DJ Player - Spotify Party Mix</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+    body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 100vh; padding-top: 20px; }
     .track { text-align: center; margin-bottom: 30px; }
     .track img { width: 320px; height: 320px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.8); }
     .track h2 { font-size: 28px; margin: 15px 0 5px; }
@@ -18,6 +18,12 @@
     .status { margin-top: 30px; font-size: 16px; color: #999; }
     #startBtn { background: #007bff; margin-top: 40px; }
     #startBtn:hover { background: #0091ff; }
+    .queue { margin-top: 40px; width: 90%; max-width: 600px; }
+    .queue h3 { font-size: 22px; margin-bottom: 10px; text-align: center; }
+    #queueList { list-style: none; padding: 0; }
+    #queueList li { display: flex; align-items: center; gap: 15px; padding: 10px; background: #222; border-radius: 8px; margin-bottom: 8px; }
+    #queueList img { width: 50px; height: 50px; border-radius: 5px; }
+    #queueList span { font-size: 16px; }
   </style>
 </head>
 <body>
@@ -33,6 +39,11 @@
   <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
   <div class="status" id="status">En attente de démarrage...</div>
 
+  <div class="queue">
+    <h3>À venir :</h3>
+    <ul id="queueList"></ul>
+  </div>
+
   <script>
     // Vérifie le token sinon redirige vers /login
     fetch('/token').then(res => res.json()).then(data => {
@@ -44,7 +55,6 @@
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
-      console.log("Réponse /token:", data);
       if (data.error) {
         document.getElementById("status").textContent = "Erreur d'authentification. Redirection...";
         window.location.href = '/login';
@@ -53,11 +63,32 @@
       return data.access_token;
     }
 
+    // Récupère et affiche la file d'attente
+    async function updateQueue(token) {
+      const res = await fetch("https://api.spotify.com/v1/me/player/queue", {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      const data = await res.json();
+      const queueList = document.getElementById("queueList");
+      queueList.innerHTML = "";
+      if (!data.queue) return;
+
+      data.queue.forEach(track => {
+        const li = document.createElement("li");
+        const img = document.createElement("img");
+        img.src = track.album.images[0]?.url || '';
+        const span = document.createElement("span");
+        span.textContent = `${track.name} – ${track.artists.map(a => a.name).join(', ')}`;
+        li.appendChild(img);
+        li.appendChild(span);
+        queueList.appendChild(li);
+      });
+    }
+
     let player;
     window.onSpotifyWebPlaybackSDKReady = () => {
       document.getElementById("startBtn").addEventListener("click", async () => {
         const token = await getToken();
-        console.log("Token reçu:", token);
 
         player = new Spotify.Player({
           name: 'DJ Player',
@@ -67,24 +98,18 @@
 
         player.addListener('ready', ({ device_id }) => {
           document.getElementById("status").textContent = "Lecteur prêt. Device ID: " + device_id;
-          console.log("Device prêt :", device_id);
-          // Lance une playlist de test
           fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
             method: "PUT",
             headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+              context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", // Playlist test
               offset: { position: 0 },
               position_ms: 0
             })
-          }).then(async r => {
-            console.log("Statut de la requête play:", r.status);
-            const txt = await r.text();
-            console.log("Réponse de Spotify:", txt);
-          }).catch(console.error);
-
+          });
           document.getElementById("playPauseBtn").disabled = false;
           document.getElementById("nextBtn").disabled = false;
+          updateQueue(token);
         });
 
         player.addListener('player_state_changed', state => {
@@ -94,6 +119,7 @@
           document.getElementById("trackName").textContent = track.name;
           document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
           document.getElementById("status").textContent = "Lecture en cours";
+          updateQueue(token);
         });
 
         player.addListener('initialization_error', ({ message }) => console.error(message));
