@@ -56,9 +56,13 @@
       const data = await res.json();
       const list = document.getElementById("priorityQueueList");
       list.innerHTML = "";
-      data.queue.forEach(uri => {
+      data.queue.forEach(track => {
         const li = document.createElement("li");
-        li.textContent = uri;
+        const img = document.createElement("img");
+        img.src = track.image;
+        const span = document.createElement("span");
+        span.textContent = `${track.name} – ${track.artists}`;
+        li.appendChild(img); li.appendChild(span);
         list.appendChild(li);
       });
     }
@@ -112,6 +116,9 @@
           updatePriorityQueue();
           updateSpotifyQueue(token);
         });
+
+        // Refresh auto toutes les 5s
+        setInterval(() => { updatePriorityQueue(); updateSpotifyQueue(token); }, 5000);
 
         player.connect();
         document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
