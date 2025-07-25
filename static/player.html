@@ -21,6 +21,7 @@
     #priorityQueueList, #queueList { list-style: none; padding: 0; }
     li { display: flex; align-items: center; gap: 15px; padding: 10px; background: #222; border-radius: 8px; margin-bottom: 8px; }
     li img { width: 50px; height: 50px; border-radius: 5px; }
+    #qrcode { margin: 20px auto; }
   </style>
 </head>
 <body>
@@ -41,6 +42,12 @@
     <ul id="priorityQueueList"></ul>
     <h3>File Spotify :</h3>
     <ul id="queueList"></ul>
+  </div>
+
+  <div style="margin-top:40px; text-align:center;">
+    <h3>Invitez vos amis :</h3>
+    <div id="qrcode"></div>
+    <p style="color:#aaa; font-size:14px;">Scannez pour ajouter vos morceaux</p>
   </div>
 
   <script>
@@ -128,5 +135,18 @@
     };
   </script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    // Génération du QR Code
+    const guestUrl = window.location.origin + "/guest.html";
+    new QRCode(document.getElementById("qrcode"), {
+      text: guestUrl,
+      width: 150,
+      height: 150,
+      colorDark : "#ffffff",
+      colorLight : "#111111",
+      correctLevel : QRCode.CorrectLevel.H
+    });
+  </script>
 </body>
 </html>
