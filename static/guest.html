@@ -156,12 +156,17 @@
       return data.tracks.items;
     }
 
-    async function addTrackToPriority(uri) {
-      await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
-      showToast("Morceau ajouté !");
-      updateQueue();
-      closeModal();
-    }
+   async function addTrackToPriority(uri) {
+  const res = await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
+  const data = await res.json();
+  if (data.error) {
+    showToast("Musique déjà écoutée !");
+    return;
+  }
+  showToast("Morceau ajouté !");
+  updateQueue();
+  closeModal();
+}
 
     function openModal() {
       const modal = document.getElementById("searchModal");
