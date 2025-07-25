@@ -33,7 +33,6 @@
   <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
   <div class="status" id="status">En attente de démarrage...</div>
 
-  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
     // Vérifier si on a un token sinon rediriger vers /login
     fetch('/token').then(res => res.json()).then(data => {
@@ -54,54 +53,51 @@
     }
 
     let player;
-    document.getElementById("startBtn").addEventListener("click", () => {
-      getToken().then(token => {
-        window.onSpotifyWebPlaybackSDKReady = () => {
-          player = new Spotify.Player({
-            name: 'DJ Player',
-            getOAuthToken: cb => { cb(token); },
-            volume: 1.0
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      document.getElementById("startBtn").addEventListener("click", async () => {
+        const token = await getToken();
+        player = new Spotify.Player({
+          name: 'DJ Player',
+          getOAuthToken: cb => { cb(token); },
+          volume: 1.0
+        });
+
+        player.addListener('ready', ({ device_id }) => {
+          document.getElementById("status").textContent = "Lecteur prêt. Device ID: " + device_id;
+          fetch("https://api.spotify.com/v1/me/player", {
+            method: "PUT",
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: [device_id], play: true })
           });
+          document.getElementById("playPauseBtn").disabled = false;
+          document.getElementById("nextBtn").disabled = false;
+        });
 
-          player.addListener('ready', ({ device_id }) => {
-            document.getElementById("status").textContent = "Lecteur prêt. Device ID: " + device_id;
-            fetch("https://api.spotify.com/v1/me/player", {
-              method: "PUT",
-              headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ device_ids: [device_id], play: true })
-            });
-            document.getElementById("playPauseBtn").disabled = false;
-            document.getElementById("nextBtn").disabled = false;
-          });
+        player.addListener('player_state_changed', state => {
+          if (!state) return;
+          const track = state.track_window.current_track;
+          document.getElementById("albumArt").src = track.album.images[0].url;
+          document.getElementById("trackName").textContent = track.name;
+          document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
+          document.getElementById("status").textContent = "Lecture en cours";
+        });
 
-          player.addListener('player_state_changed', state => {
-            if (!state) return;
-            const track = state.track_window.current_track;
-            document.getElementById("albumArt").src = track.album.images[0].url;
-            document.getElementById("trackName").textContent = track.name;
-            document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
-            document.getElementById("status").textContent = "Lecture en cours";
-          });
+        player.addListener('initialization_error', ({ message }) => console.error(message));
+        player.addListener('authentication_error', ({ message }) => {
+          console.error(message);
+          document.getElementById("status").textContent = "Erreur d'authentification. Relancez le login.";
+        });
+        player.addListener('account_error', ({ message }) => console.error(message));
+        player.addListener('playback_error', ({ message }) => console.error(message));
 
-          player.addListener('initialization_error', ({ message }) => console.error(message));
-          player.addListener('authentication_error', ({ message }) => {
-            console.error(message);
-            document.getElementById("status").textContent = "Erreur d'authentification. Relancez le login.";
-          });
-          player.addListener('account_error', ({ message }) => console.error(message));
-          player.addListener('playback_error', ({ message }) => console.error(message));
+        player.connect();
+        document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
+        document.getElementById("nextBtn").onclick = () => player.nextTrack();
 
-          player.connect();
-          document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
-          document.getElementById("nextBtn").onclick = () => player.nextTrack();
-
-          document.getElementById("startBtn").style.display = "none";
-        };
-      }).catch(err => {
-        console.error(err);
-        document.getElementById("status").textContent = "Impossible de récupérer le token.";
+        document.getElementById("startBtn").style.display = "none";
       });
-    });
+    };
   </script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
 </body>
 </html>
