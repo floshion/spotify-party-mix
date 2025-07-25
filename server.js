@@ -14,16 +14,15 @@ const redirect_uri = process.env.REDIRECT_URI;
 
 let access_token = null;
 let refresh_token = null;
-let priorityQueue = []; // FILE PRIORITAIRE (URIs des invités)
+let priorityQueue = []; // [{ uri, name, artists, image }]
 
-// Redirige vers Spotify pour login
+// --- Authentification Spotify ---
 app.get('/login', (req, res) => {
   const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
   const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=code&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scope)}`;
   res.redirect(authUrl);
 });
 
-// Callback Spotify → échange le code contre token
 app.get('/callback', async (req, res) => {
   const code = req.query.code || null;
   const response = await fetch('https://accounts.spotify.com/api/token', {
@@ -46,7 +45,6 @@ app.get('/callback', async (req, res) => {
   res.redirect('/player.html');
 });
 
-// Fournit un access_token actualisé
 app.get('/token', async (req, res) => {
   if (!refresh_token) return res.status(401).json({ error: 'Not authenticated' });
 
@@ -68,32 +66,45 @@ app.get('/token', async (req, res) => {
   res.json({ access_token });
 });
 
-// Ajouter un morceau à la file prioritaire
-app.post('/add-priority-track', (req, res) => {
+// --- File prioritaire enrichie ---
+app.post('/add-priority-track', async (req, res) => {
   const uri = req.query.uri;
   if (!uri) return res.status(400).json({ error: "No URI provided" });
-  priorityQueue.push(uri);
-  res.json({ message: "Track added to priority queue" });
+
+  const trackId = uri.split(":").pop();
+  const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+    headers: { 'Authorization': 'Bearer ' + access_token }
+  });
+  const track = await trackRes.json();
+
+  if (track.error) return res.status(500).json({ error: "Impossible de récupérer les infos du morceau" });
+
+  const trackInfo = {
+    uri: uri,
+    name: track.name,
+    artists: track.artists.map(a => a.name).join(', '),
+    image: track.album.images[0]?.url || ''
+  };
+  priorityQueue.push(trackInfo);
+  res.json({ message: "Track added to priority queue", track: trackInfo });
 });
 
-// Récupérer la file prioritaire
 app.get('/priority-queue', (req, res) => {
   res.json({ queue: priorityQueue });
 });
 
-// Jouer le prochain morceau de la file prioritaire
 app.post('/play-priority', async (req, res) => {
   if (priorityQueue.length === 0) return res.status(400).json({ error: "Priority queue is empty" });
-  const trackUri = priorityQueue.shift();
-  const playRes = await fetch('https://api.spotify.com/v1/me/player/play', {
+  const track = priorityQueue.shift();
+  await fetch('https://api.spotify.com/v1/me/player/play', {
     method: 'PUT',
     headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uris: [trackUri] })
+    body: JSON.stringify({ uris: [track.uri] })
   });
-  res.json({ message: "Playing priority track", track: trackUri });
+  res.json({ message: "Playing priority track", track });
 });
 
-// Servir les fichiers statiques
+// --- Fichiers statiques ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use(express.static(path.join(__dirname, 'static')));
