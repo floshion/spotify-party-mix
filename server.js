@@ -19,7 +19,7 @@ let   refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
 const SOURCE_PLAYLIST      = '1g39kHQqy4XHxGGftDiUWb';
 const TARGET_QUEUE_LENGTH  = 6;
 
-let priorityQueue = [];     // [{ uri,name,artists,image,auto }]
+let priorityQueue = [];     
 let playedTracks  = new Set(); // <-- mémorise les morceaux déjà joués
 
 /* ------------------------------------------------------------------
@@ -106,6 +106,28 @@ async function autoFillQueue (forcePlay = false) {
 }
 
 /* ------------------------------------------------------------------
+   Polling : suivre le morceau actuellement joué (pour l'ajouter à playedTracks)
+   ----------------------------------------------------------------*/
+async function pollCurrentTrack() {
+  if (!access_token) return;
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const currentUri = data?.item?.uri;
+    if (currentUri && !playedTracks.has(currentUri)) {
+      playedTracks.add(currentUri);
+      console.log('🎵 Ajouté aux joués:', data.item.name);
+    }
+  } catch (e) {
+    console.error('Erreur poll track:', e.message);
+  }
+}
+setInterval(pollCurrentTrack, 5000);
+
+/* ------------------------------------------------------------------
    Auth routes
    ----------------------------------------------------------------*/
 app.get('/login', (_req, res) => {
@@ -180,6 +202,9 @@ app.post('/play-priority', async (_req, res) => {
 });
 
 app.get('/priority-queue', (_req, res) => res.json({ queue: priorityQueue }));
+
+// DEBUG : voir les morceaux déjà joués
+app.get('/played-tracks', (_req, res) => res.json({ played: Array.from(playedTracks) }));
 
 /* ------------------------------------------------------------------
    Static files
