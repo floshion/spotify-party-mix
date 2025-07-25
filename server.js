@@ -18,6 +18,8 @@ let priorityQueue = [];
 let lastSeedTrack = null; 
 let lastSeedInfo = { title: "Inconnu", artist: "" };
 
+const FALLBACK_PLAYLIST = "37i9dQZF1DXcBWIGoYBM5M"; // Top 50 France
+
 // --- Auth Spotify ---
 app.get('/login', (req, res) => {
   const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
@@ -69,6 +71,13 @@ app.get('/token', async (req, res) => {
   access_token = data.access_token;
   res.json({ access_token });
 });
+
+// --- Vérifie si un track est valide (dispo dans le marché) ---
+async function validateTrack(trackId) {
+  const url = `https://api.spotify.com/v1/tracks/${trackId}?market=FR`;
+  const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + access_token } });
+  return res.ok;
+}
 
 // --- Récupère le morceau en cours comme seed ---
 async function initSeedTrack() {
@@ -156,13 +165,29 @@ async function autoFillQueue(forcePlay = false) {
       }
     }
 
-    if (priorityQueue.length === 0) {
-      const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
-      console.log("🎯 Requête recommandations :", url);
-
-      const recRes = await fetch(url, {
+    // Vérifier que le seed est valide
+    const isValid = await validateTrack(lastSeedTrack);
+    if (!isValid) {
+      console.log(`⚠️ Seed ${lastSeedTrack} invalide → fallback vers Top 50 France`);
+      const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=1&market=FR`, {
         headers: { 'Authorization': 'Bearer ' + access_token }
       });
+      const playlistData = await playlistRes.json();
+      if (playlistData.items && playlistData.items.length > 0) {
+        lastSeedTrack = playlistData.items[0].track.id;
+        lastSeedInfo = { title: playlistData.items[0].track.name, artist: playlistData.items[0].track.artists.map(a => a.name).join(', ') };
+        console.log("🎵 Nouveau seed choisi :", lastSeedInfo.title);
+      } else {
+        console.log("❌ Impossible de trouver un seed de fallback.");
+        return;
+      }
+    }
+
+    if (priorityQueue.length === 0) {
+      const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
+      console.log("🎯 Requête recommandations avec seed :", lastSeedInfo.title, `(${lastSeedTrack})`);
+
+      const recRes = await fetch(url, { headers: { 'Authorization': 'Bearer ' + access_token } });
 
       if (!recRes.ok) {
         const errText = await recRes.text();
@@ -182,7 +207,7 @@ async function autoFillQueue(forcePlay = false) {
 
       if (!recData.tracks || recData.tracks.length === 0) {
         console.log("⚠️ Aucune reco trouvée → fallback Top 50 France");
-        const playlistRes = await fetch('https://api.spotify.com/v1/playlists/37i9dQZF1DXcBWIGoYBM5M/tracks?limit=3', {
+        const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=3`, {
           headers: { 'Authorization': 'Bearer ' + access_token }
         });
         const playlistData = await playlistRes.json();
