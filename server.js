@@ -1,217 +1,131 @@
-// server.js – DJ Auto-mix (unique random tracks from playlist 1g39kHQqy4XHxGGftDiUWb)
-// Ne joue jamais deux fois le même titre. Lorsqu'il ne reste plus
-// de morceaux inédits, on laisse la file se vider : pas de remplissage forcé.
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>DJ Player – Playlist MUSIQUES</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="favicon_flo.png">
+  <style>
+    body{background:#111;color:#fff;font-family:Arial,sans-serif;margin:0;padding:0;display:flex;flex-direction:column;align-items:center;min-height:100vh}
+    .main-container{display:flex;justify-content:space-between;width:95%;max-width:1200px;margin-top:30px}
+    .qr-container{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
+    #qrcode{margin-bottom:10px}
+    .qr-container .logo{display:block;margin-top:20px;width:150px;height:150px;border-radius:50%;object-fit:cover;background:#111}
+    .track-container{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center}
+    .track-container img{width:320px;height:320px;border-radius:15px;box-shadow:0 0 15px rgba(0,0,0,.8)}
+    .track-container h2{font-size:28px;margin:15px 0 5px}
+    .track-container p{font-size:20px;color:#ccc;margin:0}
+    .controls{display:flex;gap:20px;margin-top:20px}
+    .btn{background:#1DB954;border:none;padding:15px 25px;border-radius:50px;font-size:18px;cursor:pointer;transition:.3s}
+    .btn:hover{background:#1ed760}
+    .next{background:#ff9800}.next:hover{background:#ffb84d}
+    .queue-container{flex:1;background:#222;padding:15px;border-radius:10px;overflow-y:auto;max-height:500px}
+    .queue-container h3{text-align:center;margin-bottom:10px}
+    #priorityQueueList{list-style:none;padding:0}
+    #priorityQueueList li{display:flex;align-items:center;gap:10px;background:#333;padding:8px;border-radius:5px;margin-bottom:8px}
+    #priorityQueueList img{width:50px;height:50px;border-radius:5px}
+    #errorMsg{color:#ff4444;font-size:16px;margin-top:10px}
+    .progress-container{width:100%;max-width:320px;height:8px;background:#333;border-radius:4px;margin-top:15px}
+    .progress-bar{height:100%;background:#1DB954;width:0%;border-radius:4px}
+    .time-info{display:flex;justify-content:space-between;width:100%;max-width:320px;font-size:14px;color:#aaa;margin-top:5px}
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <!-- QR code + logo -->
+    <div class="qr-container">
+      <h3>Invitez vos amis</h3>
+      <div id="qrcode"></div>
+      <p style="color:#aaa;font-size:14px">Scannez pour ajouter vos morceaux</p>
+      <img src="logo_flo_besset.png" alt="Flo BESSET" class="logo">
+    </div>
 
-import express from 'express';
-import fetch   from 'node-fetch';
-import dotenv  from 'dotenv';
-import path    from 'path';
-import { fileURLToPath } from 'url';
+    <!-- Player -->
+    <div class="track-container">
+      <img id="albumArt" src="" alt="Album cover">
+      <h2 id="trackName">Cliquez sur 'Démarrer'…</h2>
+      <p id="artistName"></p>
+      <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="time-info"><span id="currentTime">0:00</span><span id="totalTime">0:00</span></div>
+      <div class="controls">
+        <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
+        <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
+      </div>
+      <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
+      <p id="errorMsg"></p>
+    </div>
 
-dotenv.config();
+    <!-- File invités -->
+    <div class="queue-container"><h3>Morceaux à venir :</h3><ul id="priorityQueueList"></ul></div>
+  </div>
 
-const app  = express();
-const PORT = process.env.PORT || 3000;
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+    // QR Code guest
+    const guestUrl = window.location.origin + '/guest.html';
+    new QRCode(document.getElementById('qrcode'), { text: guestUrl, width:200, height:200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
 
-// ----- Spotify credentials (gardés en variables d’environnement) -----
-const client_id     = process.env.SPOTIFY_CLIENT_ID;
-const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
-const redirect_uri  = process.env.REDIRECT_URI || 'http://localhost:3000/callback';
-let   access_token  = null;
-let   refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
+    async function getToken(){
+      const res = await fetch('/token');
+      const data= await res.json();
+      if(!data.access_token){ document.getElementById('errorMsg').textContent="Token manquant"; throw new Error('No token'); }
+      return data.access_token;
+    }
 
-// ----- Paramètres DJ -----
-const SOURCE_PLAYLIST     = '1g39kHQqy4XHxGGftDiUWb'; // playlist MUSIQUES
-const TARGET_QUEUE_LENGTH = 6;                        // file idéale (mais pas obligatoire)
+    async function updateQueue(){
+      const res=await fetch('/priority-queue');
+      const data=await res.json();
+      const list=document.getElementById('priorityQueueList');
+      list.innerHTML='';
+      data.queue.forEach(t=>{
+        const li=document.createElement('li');
+        li.innerHTML=`<img src="${t.image}"><span>${t.name} – ${t.artists}${t.auto?' (Auto)':''}</span>`;
+        list.appendChild(li);
+      });
+    }
+    setInterval(updateQueue,5000);
 
-// ----- États -----
-let priorityQueue = [];               // [{ uri,name,artists,image,auto }]
-const playedTracks = new Set();       // trackId déjà joués (pour éviter les doublons)
-let totalTracksInPlaylist = null;     // récupéré une fois pour accélérer
+    function fmt(ms){const m=Math.floor(ms/60000);const s=Math.floor((ms%60000)/1000).toString().padStart(2,'0');return `${m}:${s}`;}
 
-/* ------------------------------------------------------------------
-   Auth helpers
-   ----------------------------------------------------------------*/
-async function refreshAccessToken () {
-  if (!refresh_token) return;
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method  : 'POST',
-    headers : {
-      'Content-Type' : 'application/x-www-form-urlencoded',
-      'Authorization': 'Basic ' + Buffer.from(`${client_id}:${client_secret}`).toString('base64')
-    },
-    body    : new URLSearchParams({ grant_type: 'refresh_token', refresh_token })
-  });
-  const data = await res.json();
-  if (data.access_token) {
-    access_token = data.access_token;
-    console.log('🔄 Nouveau access_token');
-  } else console.error('❌ Refresh KO :', data);
-}
-await refreshAccessToken();
-setInterval(refreshAccessToken, 50 * 60 * 1000);
+    let player;
+    window.onSpotifyWebPlaybackSDKReady=()=>{
+      document.getElementById('startBtn').addEventListener('click',async()=>{
+        try{
+          const token=await getToken();
+          player=new Spotify.Player({name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1});
 
-/* ------------------------------------------------------------------
-   Utils : piocher des titres aléatoires inédits dans la playlist
-   ----------------------------------------------------------------*/
-async function fetchRandomUniqueTracks(limit = 3) {
-  if (limit <= 0) return [];
+          player.addListener('ready', async ({device_id})=>{
+            // Demande au serveur de démarrer la file prioritaire
+            await fetch('/play-priority',{method:'POST'});
+            document.getElementById('playPauseBtn').disabled=false;
+            document.getElementById('nextBtn').disabled=true; // next manuel passe par /play-priority déjà
+            updateQueue();
+          });
 
-  const headers = { Authorization: 'Bearer ' + access_token };
+          player.addListener('player_state_changed',state=>{
+            if(!state) return;
+            const track=state.track_window.current_track;
+            document.getElementById('albumArt').src=track.album.images[0].url;
+            document.getElementById('trackName').textContent=track.name;
+            document.getElementById('artistName').textContent=track.artists.map(a=>a.name).join(', ');
 
-  // Récupère le total de titres une seule fois
-  if (totalTracksInPlaylist === null) {
-    const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${SOURCE_PLAYLIST}?fields=tracks(total)&market=FR`, { headers });
-    if (!metaRes.ok) return [];
-    totalTracksInPlaylist = (await metaRes.json()).tracks.total;
-  }
+            const {position,duration}=state;
+            document.getElementById('progressBar').style.width=((position/duration)*100)+'%';
+            document.getElementById('currentTime').textContent=fmt(position);
+            document.getElementById('totalTime').textContent=fmt(duration);
+          });
 
-  // S'il n'y a plus de titres inédits disponibles, retourne []
-  if (playedTracks.size >= totalTracksInPlaylist) return [];
+          setInterval(async()=>{const s=await player.getCurrentState();if(s&& !s.paused){const {position,duration}=s;document.getElementById('progressBar').style.width=((position/duration)*100)+'%';document.getElementById('currentTime').textContent=fmt(position);document.getElementById('totalTime').textContent=fmt(duration);}},1000);
 
-  const results = [];
-  const triedOffsets = new Set();
-  const maxAttempts = Math.min(totalTracksInPlaylist * 2, 500); // sécurité boucle infinie
-
-  for (let attempts = 0; attempts < maxAttempts && results.length < limit; attempts++) {
-    const offset = Math.floor(Math.random() * totalTracksInPlaylist);
-    if (triedOffsets.has(offset)) continue;
-    triedOffsets.add(offset);
-
-    const itemRes = await fetch(`https://api.spotify.com/v1/playlists/${SOURCE_PLAYLIST}/tracks?limit=1&offset=${offset}&market=FR`, { headers });
-    if (!itemRes.ok) continue;
-    const item = (await itemRes.json()).items?.[0];
-    if (!item?.track) continue;
-
-    const trackId = item.track.id;
-    if (playedTracks.has(trackId)) continue;                    // déjà joué
-    if (priorityQueue.some(t => t.uri === item.track.uri)) continue; // déjà dans la queue
-
-    results.push({
-      uri    : item.track.uri,
-      name   : item.track.name,
-      artists: item.track.artists.map(a => a.name).join(', '),
-      image  : item.track.album.images?.[0]?.url || '',
-      auto   : true
-    });
-  }
-  return results;
-}
-
-/* ------------------------------------------------------------------
-   Queue management
-   ----------------------------------------------------------------*/
-async function autoFillQueue (forcePlay = false) {
-  await refreshAccessToken();
-  const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
-
-  // Tente de compléter avec des titres inédits, mais accepte une file plus courte
-  if (missing > 0) {
-    const randoms = await fetchRandomUniqueTracks(missing);
-    priorityQueue.push(...randoms);
-  }
-
-  if (forcePlay && priorityQueue.length) {
-    await playNextFromQueue();
-  }
-}
-
-async function playNextFromQueue() {
-  const track = priorityQueue.shift();
-  if (!track) return;
-
-  const trackId = track.uri.split(':').pop();
-  playedTracks.add(trackId);
-
-  await fetch('https://api.spotify.com/v1/me/player/play', {
-    method : 'PUT',
-    headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-    body   : JSON.stringify({ uris: [track.uri] })
-  });
-  console.log('▶️ Now playing', track.name, '–', track.artists);
-}
-
-/* ------------------------------------------------------------------
-   Auth routes
-   ----------------------------------------------------------------*/
-app.get('/login', (_req, res) => {
-  const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
-  const url = 'https://accounts.spotify.com/authorize' +
-    `?client_id=${client_id}&response_type=code&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scope)}`;
-  res.redirect(url);
-});
-
-app.get('/callback', async (req, res) => {
-  const code = req.query.code;
-  if (!code) return res.status(400).send('No code');
-  const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
-    method : 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body   : new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri, client_id, client_secret })
-  });
-  const data = await tokenRes.json();
-  access_token  = data.access_token;
-  refresh_token = data.refresh_token;
-  res.redirect('/');
-});
-
-app.get('/token',  (_req, res) => res.json({ access_token }));
-app.get('/config', (_req, res) => res.json({ source_playlist: SOURCE_PLAYLIST }));
-
-/* ------------------------------------------------------------------
-   Priority queue routes
-   ----------------------------------------------------------------*/
-app.post('/add-priority-track', async (req, res) => {
-  const uri = req.query.uri;
-  if (!uri) return res.status(400).json({ error: 'No URI provided' });
-
-  const trackId = uri.split(':').pop();
-  if (playedTracks.has(trackId) || priorityQueue.some(t => t.uri === uri)) {
-    return res.status(409).json({ error: 'Ce morceau a déjà été joué ou est déjà programmé.' });
-  }
-
-  // Infos du titre invité
-  const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${trackId}?market=FR`, { headers: { Authorization: 'Bearer ' + access_token } });
-  const track    = await trackRes.json();
-  if (track.error) return res.status(500).json({ error: 'Unable to fetch track' });
-
-  const trackInfo = { uri, name: track.name, artists: track.artists.map(a => a.name).join(', '), image: track.album.images?.[0]?.url || '', auto: false };
-  priorityQueue.push(trackInfo);
-
-  // Tentative de complétion (mais pas de doublons, donc peut être partiel)
-  const missing  = TARGET_QUEUE_LENGTH - priorityQueue.length;
-  const autoFill = await fetchRandomUniqueTracks(missing);
-  priorityQueue.push(...autoFill);
-
-  res.json({ message: 'Track added + auto-fill', track: trackInfo, auto: autoFill });
-});
-
-app.post('/play-priority', async (_req, res) => {
-  if (!priorityQueue.length) return res.status(400).json({ error: 'Queue empty' });
-  await playNextFromQueue();
-
-  // Remplir si possible (sans doublons)
-  const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
-  if (missing > 0) {
-    const autoTracks = await fetchRandomUniqueTracks(missing);
-    priorityQueue.push(...autoTracks);
-  }
-  res.json({ message: 'Playing next track (unique ensured)' });
-});
-
-app.get('/priority-queue', (_req, res) => res.json({ queue: priorityQueue }));
-
-/* ------------------------------------------------------------------
-   Static files
-   ----------------------------------------------------------------*/
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, 'static')));
-app.get('/',    (_req, res) => res.redirect('/player.html'));
-app.get('/guest',(_req, res) => res.redirect('/guest.html'));
-
-/* ------------------------------------------------------------------
-   Boot
-   ----------------------------------------------------------------*/
-app.listen(PORT, () => console.log(`🚀 Server ready on port ${PORT}`));
-setInterval(() => autoFillQueue(false), 20 * 1000);
+          player.connect();
+          document.getElementById('playPauseBtn').onclick=()=>player.togglePlay();
+          document.getElementById('nextBtn').onclick=async()=>{await fetch('/play-priority',{method:'POST'});updateQueue();};
+          document.getElementById('startBtn').style.display='none';
+        }catch(e){console.error(e);}
+      });
+    };
+  </script>
+</body>
+</html>
