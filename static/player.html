@@ -10,15 +10,7 @@
     .main-container { display: flex; justify-content: space-between; width: 95%; max-width: 1200px; margin-top: 30px; }
     .qr-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     #qrcode { margin-bottom: 10px; }
-    .qr-container .logo {
-      display: block;
-      margin-top: 20px;
-      width: 150px;
-      height: 150px;
-      border-radius: 50%;
-      object-fit: cover;
-      background: #111;
-    }
+    .qr-container .logo { display: block; margin-top: 20px; width: 150px; height: 150px; border-radius: 50%; object-fit: cover; background: #111; }
     .track-container { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
     .track-container img { width: 320px; height: 320px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.8); }
     .track-container h2 { font-size: 28px; margin: 15px 0 5px; }
@@ -35,11 +27,12 @@
     #priorityQueueList li { display: flex; align-items: center; gap: 10px; background: #333; padding: 8px; border-radius: 5px; margin-bottom: 8px; }
     #priorityQueueList img { width: 50px; height: 50px; border-radius: 5px; }
     .debug { margin-top: 30px; font-size: 14px; color: #888; background: #1c1c1c; padding: 10px; border-radius: 8px; width: 90%; max-width: 800px; }
+    #errorMsg { color: #ff4444; font-size: 16px; margin-top: 10px; }
   </style>
 </head>
 <body>
   <div class="main-container">
-    <!-- QR code + Logo à gauche -->
+    <!-- QR code + Logo -->
     <div class="qr-container">
       <h3>Invitez vos amis</h3>
       <div id="qrcode"></div>
@@ -47,7 +40,7 @@
       <img src="logo_flo_besset.png" alt="Flo BESSET" class="logo">
     </div>
 
-    <!-- Pochette + contrôles au centre -->
+    <!-- Player -->
     <div class="track-container">
       <img id="albumArt" src="" alt="Album cover">
       <h2 id="trackName">Cliquez sur "Démarrer"…</h2>
@@ -59,16 +52,17 @@
       <button class="btn" id="skipPriority">⏩ Passer au prochain invité</button>
       <button class="btn" id="forceAuto">🎛 Forcer DJ Auto</button>
       <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
+      <p id="errorMsg"></p>
     </div>
 
-    <!-- Liste invités à droite -->
+    <!-- File invités -->
     <div class="queue-container">
       <h3>Morceaux invités à venir :</h3>
       <ul id="priorityQueueList"></ul>
     </div>
   </div>
 
-  <!-- Bloc debug -->
+  <!-- Debug -->
   <div class="debug">
     <strong>DEBUG :</strong><br>
     Seed ID : <span id="debugSeed">Inconnu</span><br>
@@ -80,7 +74,10 @@
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
-      if (data.error) { window.location.href = '/login'; throw new Error("Non authentifié"); }
+      if (!data.access_token) {
+        document.getElementById("errorMsg").textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
+        throw new Error("Token invalide");
+      }
       return data.access_token;
     }
 
@@ -123,37 +120,46 @@
     let player;
     window.onSpotifyWebPlaybackSDKReady = () => {
       document.getElementById("startBtn").addEventListener("click", async () => {
-        const token = await getToken();
-        player = new Spotify.Player({ name: 'DJ Player', getOAuthToken: cb => { cb(token); }, volume: 1.0 });
+        try {
+          const token = await getToken();
+          player = new Spotify.Player({ name: 'DJ Player', getOAuthToken: cb => { cb(token); }, volume: 1.0 });
 
-        player.addListener('ready', ({ device_id }) => {
-          fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
-            method: "PUT",
-            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" })
+          player.addListener('ready', ({ device_id }) => {
+            fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
+              method: "PUT",
+              headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" })
+            });
+            document.getElementById("playPauseBtn").disabled = false;
+            document.getElementById("nextBtn").disabled = false;
+            updatePriorityQueue();
+            updateDebugSeed();
           });
-          document.getElementById("playPauseBtn").disabled = false;
-          document.getElementById("nextBtn").disabled = false;
-          updatePriorityQueue();
-          updateDebugSeed();
-        });
 
-        player.addListener('player_state_changed', state => {
-          if (!state) return;
-          const track = state.track_window.current_track;
-          document.getElementById("albumArt").src = track.album.images[0].url;
-          document.getElementById("trackName").textContent = track.name;
-          document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
-          updatePriorityQueue();
-          updateDebugSeed();
-        });
+          player.addListener('initialization_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur init : " + message);
+          player.addListener('authentication_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur auth : " + message);
+          player.addListener('account_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur compte : " + message);
+          player.addListener('playback_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur lecture : " + message);
 
-        setInterval(() => { updatePriorityQueue(); updateDebugSeed(); }, 5000);
+          player.addListener('player_state_changed', state => {
+            if (!state) return;
+            const track = state.track_window.current_track;
+            document.getElementById("albumArt").src = track.album.images[0].url;
+            document.getElementById("trackName").textContent = track.name;
+            document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
+            updatePriorityQueue();
+            updateDebugSeed();
+          });
 
-        player.connect();
-        document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
-        document.getElementById("nextBtn").onclick = () => player.nextTrack();
-        document.getElementById("startBtn").style.display = "none";
+          setInterval(() => { updatePriorityQueue(); updateDebugSeed(); }, 5000);
+
+          player.connect();
+          document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
+          document.getElementById("nextBtn").onclick = () => player.nextTrack();
+          document.getElementById("startBtn").style.display = "none";
+        } catch (e) {
+          console.error(e);
+        }
       });
     };
   </script>
