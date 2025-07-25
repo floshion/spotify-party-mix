@@ -1,3 +1,8 @@
+// server.js
+// -----------------------------------------------------------------------------
+// DJ Auto-mix v2 – compatible avec les API Spotify encore ouvertes (juillet 2025)
+// -----------------------------------------------------------------------------
+
 import express from 'express';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
@@ -5,282 +10,299 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+// -----------------------------------------------------------------------------
+// Config & variables globales
+// -----------------------------------------------------------------------------
+const app             = express();
+const PORT            = process.env.PORT || 3000;
 
-const client_id = process.env.SPOTIFY_CLIENT_ID;
-const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
-const redirect_uri = process.env.REDIRECT_URI;
-let access_token = null;
-let refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
+const client_id       = process.env.SPOTIFY_CLIENT_ID;
+const client_secret   = process.env.SPOTIFY_CLIENT_SECRET;
+const redirect_uri    = process.env.REDIRECT_URI;
+let   access_token    = null;
+let   refresh_token   = process.env.SPOTIFY_REFRESH_TOKEN || null;
 
-let priorityQueue = []; 
-let lastSeedTrack = null; 
-let lastSeedInfo = { title: "Inconnu", artist: "" };
+const FALLBACK_PLAYLIST = '37i9dQZF1DXcBWIGoYBM5M';        // Top 50 France
 
-const FALLBACK_PLAYLIST = "37i9dQZF1DXcBWIGoYBM5M"; // Top 50 France
+let priorityQueue = [];   // [{ uri, name, artists, image, auto }]
+let lastSeedTrack = null; // id Spotify
+let lastSeedInfo  = null; // { title, artist }
 
-// --- Rafraîchir l'access_token
+// -----------------------------------------------------------------------------
+// Auth Spotify
+// -----------------------------------------------------------------------------
 async function refreshAccessToken() {
-    if (!refresh_token) {
-        console.log("❌ Aucun refresh_token trouvé. Connecte-toi via /login.");
-        return;
-    }
-    try {
-        const res = await fetch('https://accounts.spotify.com/api/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: refresh_token,
-                client_id: client_id,
-                client_secret: client_secret
-            })
-        });
-        const data = await res.json();
-        if (data.access_token) {
-            access_token = data.access_token;
-            console.log("🔄 Nouveau access_token généré");
-        } else {
-            console.error("❌ Échec du refresh token :", data);
-        }
-    } catch (err) {
-        console.error("❌ Erreur lors du refresh token :", err);
-    }
+  if (!refresh_token) return;
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method : 'POST',
+    headers: {
+      'Content-Type' : 'application/x-www-form-urlencoded',
+      'Authorization': 'Basic ' + Buffer.from(`${client_id}:${client_secret}`).toString('base64')
+    },
+    body   : new URLSearchParams({
+      grant_type   : 'refresh_token',
+      refresh_token
+    })
+  });
+  const data = await res.json();
+  if (data.access_token) {
+    access_token = data.access_token;
+    console.log('🔄 Nouveau access_token généré');
+  } else {
+    console.error('❌ Échec du refresh token :', data);
+  }
 }
-setInterval(refreshAccessToken, 50 * 60 * 1000);
+setInterval(refreshAccessToken, 50 * 60 * 1000); // 50 min
 
-// --- Login Spotify
-app.get('/login', (req, res) => {
-    const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=code&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scope)}`;
-    res.redirect(authUrl);
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+async function validateTrack(id) {
+  const url = `https://api.spotify.com/v1/tracks/${id}?market=FR`;
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + access_token } });
+  return res.ok;
+}
+
+// ► NOUVEAU : génère 3 titres « similaires » sans /recommendations
+async function fetchSimilarTracks(trackId, limit = 3) {
+  // 1) détails du morceau (pour récupérer l’artiste)
+  const trackRes  = await fetch(
+    `https://api.spotify.com/v1/tracks/${trackId}?market=FR`,
+    { headers: { Authorization: 'Bearer ' + access_token } }
+  );
+  if (!trackRes.ok) return [];
+  const trackData = await trackRes.json();
+  const artistId  = trackData.artists?.[0]?.id;
+  if (!artistId)  return [];
+
+  // 2) genres de l’artiste
+  const artistRes  = await fetch(
+    `https://api.spotify.com/v1/artists/${artistId}`,
+    { headers: { Authorization: 'Bearer ' + access_token } }
+  );
+  const artistData = await artistRes.json();
+  const genres     = artistData.genres?.slice(0, 2) || []; // max 2 genres
+
+  let pool = [];
+
+  // 3A) recherche par genre
+  for (const g of genres) {
+    const q = encodeURIComponent(`genre:"${g}" NOT tag:new`);
+    const searchRes = await fetch(
+      `https://api.spotify.com/v1/search?q=${q}&type=track&market=FR&limit=20`,
+      { headers: { Authorization: 'Bearer ' + access_token } }
+    );
+    const { tracks } = await searchRes.json();
+    pool.push(...(tracks?.items || []));
+  }
+
+  // 3B) fallback : top-tracks de l’artiste
+  if (pool.length === 0) {
+    const topRes = await fetch(
+      `https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=FR`,
+      { headers: { Authorization: 'Bearer ' + access_token } }
+    );
+    const { tracks } = await topRes.json();
+    pool = tracks || [];
+  }
+
+  // 4) filtrage + tri popularité
+  const uniques = {};
+  pool.forEach(t => { uniques[t.id] = t; });
+  const candidates = Object.values(uniques)
+    .filter(t => t.id !== trackId)
+    .sort((a, b) => b.popularity - a.popularity)
+    .slice(0, limit);
+
+  // 5) format queue
+  return candidates.map(t => ({
+    uri    : t.uri,
+    name   : t.name,
+    artists: t.artists.map(a => a.name).join(', '),
+    image  : t.album.images?.[0]?.url || '',
+    auto   : true
+  }));
+}
+
+// -----------------------------------------------------------------------------
+// Init seed (si rien ne joue)
+// -----------------------------------------------------------------------------
+async function initSeedTrack() {
+  const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+    headers: { Authorization: 'Bearer ' + access_token }
+  });
+  if (res.status === 200) {
+    const data = await res.json();
+    if (data?.item) {
+      lastSeedTrack = data.item.id;
+      lastSeedInfo  = { title: data.item.name, artist: data.item.artists.map(a => a.name).join(', ') };
+      console.log('🎵 Seed initial :', lastSeedInfo.title);
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Auto-fill queue
+// -----------------------------------------------------------------------------
+async function autoFillQueue(forcePlay = false) {
+  await refreshAccessToken();
+  if (!lastSeedTrack) await initSeedTrack();
+  if (!lastSeedTrack) { console.log('⚠️ Pas de seed dispo'); return; }
+
+  // Vérifie que la seed est valide ; sinon on prend le 1er titre Top 50
+  const isValid = await validateTrack(lastSeedTrack);
+  if (!isValid) {
+    const plRes = await fetch(
+      `https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=1&market=FR`,
+      { headers: { Authorization: 'Bearer ' + access_token } }
+    );
+    const plData = await plRes.json();
+    if (plData.items?.length) {
+      lastSeedTrack = plData.items[0].track.id;
+      lastSeedInfo  = {
+        title : plData.items[0].track.name,
+        artist: plData.items[0].track.artists.map(a => a.name).join(', ')
+      };
+    }
+  }
+
+  // ► ICI on remplace l’ancien appel /recommendations
+  if (priorityQueue.length === 0) {
+    const newTracks = await fetchSimilarTracks(lastSeedTrack);
+    if (newTracks.length) {
+      priorityQueue.push(...newTracks);
+      console.log('✅ Auto-fill : 3 titres similaires ajoutés');
+    } else {
+      console.log('⚠️ Pas de titres similaires trouvés → fallback Top 50');
+      const plRes = await fetch(
+        `https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=3&market=FR`,
+        { headers: { Authorization: 'Bearer ' + access_token } }
+      );
+      const plData = await plRes.json();
+      plData.items?.forEach(item => {
+        priorityQueue.push({
+          uri    : item.track.uri,
+          name   : item.track.name,
+          artists: item.track.artists.map(a => a.name).join(', '),
+          image  : item.track.album.images?.[0]?.url || '',
+          auto   : true
+        });
+      });
+    }
+  }
+
+  // Force lecture immédiate (bouton « forcer DJ auto »)
+  if (forcePlay && priorityQueue.length) {
+    const track = priorityQueue.shift();
+    await fetch('https://api.spotify.com/v1/me/player/play', {
+      method : 'PUT',
+      headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ uris: [track.uri] })
+    });
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Routes Spotify Auth
+// -----------------------------------------------------------------------------
+app.get('/login', (_req, res) => {
+  const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+  const authUrl =
+    'https://accounts.spotify.com/authorize' +
+    `?client_id=${client_id}` +
+    '&response_type=code' +
+    `&redirect_uri=${encodeURIComponent(redirect_uri)}` +
+    `&scope=${encodeURIComponent(scope)}`;
+  res.redirect(authUrl);
 });
 
 app.get('/callback', async (req, res) => {
-    const code = req.query.code || null;
-    const response = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code: code,
-            redirect_uri: redirect_uri,
-            client_id: client_id,
-            client_secret: client_secret
-        })
-    });
-
-    const data = await response.json();
-    access_token = data.access_token;
-    refresh_token = data.refresh_token;
-
-    console.log("🎉 Connexion réussie !");
-    console.log("👉 COPIE CE REFRESH TOKEN DANS RENDER (SPOTIFY_REFRESH_TOKEN) :", refresh_token);
-
-    res.send("Connexion réussie ! Va coller le refresh_token dans Render (SPOTIFY_REFRESH_TOKEN), puis redéploie.");
+  const code = req.query.code || null;
+  if (!code) return res.status(400).send('No code');
+  const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
+    method : 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body   : new URLSearchParams({
+      grant_type   : 'authorization_code',
+      code,
+      redirect_uri,
+      client_id,
+      client_secret
+    })
+  });
+  const data = await tokenRes.json();
+  access_token  = data.access_token;
+  refresh_token = data.refresh_token;
+  res.redirect('/');
 });
 
-// --- Token pour le player
-app.get('/token', async (req, res) => {
-    if (!access_token) await refreshAccessToken();
-    if (!access_token) return res.status(401).json({ error: 'Not authenticated' });
-    res.json({ access_token });
-});
+app.get('/token', (_req, res) => res.json({ access_token }));
 
-// --- Vérifie si un track est valide
-async function validateTrack(trackId) {
-    const url = `https://api.spotify.com/v1/tracks/${trackId}?market=FR`;
-    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + access_token } });
-    return res.ok;
-}
-
-// --- Récupère le morceau en cours comme seed
-async function initSeedTrack() {
-    try {
-        const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
-            headers: { 'Authorization': 'Bearer ' + access_token }
-        });
-        if (res.status === 200) {
-            const data = await res.json();
-            if (data && data.item) {
-                lastSeedTrack = data.item.id;
-                lastSeedInfo = { title: data.item.name, artist: data.item.artists.map(a => a.name).join(', ') };
-                console.log("Seed mis à jour :", lastSeedInfo.title);
-            }
-        }
-    } catch (e) {
-        console.error("Erreur lors de l'init du seed :", e);
-    }
-}
-
-// --- Ajout musique prioritaire
+// -----------------------------------------------------------------------------
+// API queue (invités + player)
+// -----------------------------------------------------------------------------
 app.post('/add-priority-track', async (req, res) => {
-    const uri = req.query.uri;
-    if (!uri) return res.status(400).json({ error: "No URI provided" });
+  const uri = req.query.uri;
+  if (!uri) return res.status(400).json({ error: 'No URI provided' });
 
-    const trackId = uri.split(":").pop();
-    const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
-        headers: { 'Authorization': 'Bearer ' + access_token }
-    });
-    const track = await trackRes.json();
+  // ► Purge des anciens « auto »
+  priorityQueue = priorityQueue.filter(t => !t.auto);
 
-    if (track.error) return res.status(500).json({ error: "Impossible de récupérer les infos du morceau" });
+  const trackId   = uri.split(':').pop();
+  const trackRes  = await fetch(
+    `https://api.spotify.com/v1/tracks/${trackId}`,
+    { headers: { Authorization: 'Bearer ' + access_token } }
+  );
+  const trackData = await trackRes.json();
+  if (trackData.error) return res.status(500).json({ error: 'Impossible de récupérer le morceau' });
 
-    const trackInfo = {
-        uri: uri,
-        name: track.name,
-        artists: track.artists.map(a => a.name).join(', '),
-        image: track.album.images[0]?.url || '',
-        auto: false
-    };
-    priorityQueue.push(trackInfo);
-    lastSeedTrack = track.id;
-    lastSeedInfo = { title: track.name, artist: track.artists.map(a => a.name).join(', ') };
-    res.json({ message: "Track added to priority queue", track: trackInfo });
+  const trackInfo = {
+    uri,
+    name   : trackData.name,
+    artists: trackData.artists.map(a => a.name).join(', '),
+    image  : trackData.album.images?.[0]?.url || '',
+    auto   : false
+  };
+  priorityQueue.push(trackInfo);
+
+  // ► Le nouveau morceau devient la seed
+  lastSeedTrack = trackId;
+  lastSeedInfo  = { title: trackData.name, artist: trackData.artists.map(a => a.name).join(', ') };
+
+  res.json({ message: 'Track added to priority queue', track: trackInfo });
 });
 
-// --- Lecture musique prioritaire
-app.post('/play-priority', async (req, res) => {
-    if (priorityQueue.length === 0) return res.status(400).json({ error: "Priority queue is empty" });
-    const track = priorityQueue.shift();
-    lastSeedTrack = track.uri.split(":").pop();
-    lastSeedInfo = { title: track.name, artist: track.artists };
-    await fetch('https://api.spotify.com/v1/me/player/play', {
-        method: 'PUT',
-        headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uris: [track.uri] })
-    });
-    res.json({ message: "Playing priority track", track });
+app.post('/play-priority', async (_req, res) => {
+  if (!priorityQueue.length) return res.status(400).json({ error: 'Priority queue is empty' });
+  const track = priorityQueue.shift();
+  lastSeedTrack = track.uri.split(':').pop();
+  lastSeedInfo  = { title: track.name, artist: track.artists };
+
+  await fetch('https://api.spotify.com/v1/me/player/play', {
+    method : 'PUT',
+    headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+    body   : JSON.stringify({ uris: [track.uri] })
+  });
+  res.json({ message: 'Playing priority track', track });
 });
 
-// --- Voir la file
-app.get('/priority-queue', (req, res) => {
-    res.json({ queue: priorityQueue });
+app.post('/force-auto-fill', async (_req, res) => {
+  await autoFillQueue(true);
+  res.json({ message: 'Auto-fill forcé' });
 });
 
-// --- DEBUG : seed actuel
-app.get('/debug-seed', (req, res) => {
-    res.json({ seed: lastSeedTrack, title: lastSeedInfo.title, artist: lastSeedInfo.artist });
-});
+app.get('/priority-queue', (_req, res) => res.json({ queue: priorityQueue }));
+app.get('/debug-seed',    (_req, res) => res.json({ seed : lastSeedInfo || {} }));
 
-// --- Forcer DJ Auto
-app.post('/force-auto-fill', async (req, res) => {
-    await autoFillQueue(true);
-    res.json({ message: "Auto-fill forcé" });
-});
-
-// --- Auto-fill queue
-async function autoFillQueue(forcePlay = false) {
-    try {
-        await refreshAccessToken();
-        if (!lastSeedTrack) {
-            await initSeedTrack();
-            if (!lastSeedTrack) {
-                console.log("⚠️ Pas de seed disponible pour recommandations.");
-                return;
-            }
-        }
-
-        const isValid = await validateTrack(lastSeedTrack);
-        if (!isValid) {
-            console.log(`⚠️ Seed ${lastSeedTrack} invalide → remplacement par Top 50`);
-            const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=1&market=FR`, {
-                headers: { 'Authorization': 'Bearer ' + access_token }
-            });
-            const playlistData = await playlistRes.json();
-            if (playlistData.items && playlistData.items.length > 0) {
-                lastSeedTrack = playlistData.items[0].track.id;
-                lastSeedInfo = { title: playlistData.items[0].track.name, artist: playlistData.items[0].track.artists.map(a => a.name).join(', ') };
-                console.log("🎵 Nouveau seed choisi :", lastSeedInfo.title);
-            }
-        }
-
-        if (priorityQueue.length === 0) {
-            const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
-            console.log("🎯 Requête recommandations avec seed :", lastSeedInfo.title, `(${lastSeedTrack})`);
-            const recRes = await fetch(url, { headers: { 'Authorization': 'Bearer ' + access_token } });
-
-            if (!recRes.ok) {
-                console.error(`❌ Erreur Spotify (${recRes.status}) → fallback Top 50`);
-                const playlistRes = await fetch(`https://api.spotify.com/v1/playlists/${FALLBACK_PLAYLIST}/tracks?limit=3&market=FR`, {
-                    headers: { 'Authorization': 'Bearer ' + access_token }
-                });
-                const playlistData = await playlistRes.json();
-                if (playlistData.items && playlistData.items.length > 0) {
-                    const fallbackTracks = playlistData.items.map(item => ({
-                        uri: item.track.uri,
-                        name: item.track.name,
-                        artists: item.track.artists.map(a => a.name).join(', '),
-                        image: item.track.album.images[0]?.url || '',
-                        auto: true
-                    }));
-                    priorityQueue.push(...fallbackTracks);
-                    lastSeedTrack = playlistData.items[0].track.id;
-                    lastSeedInfo = { title: playlistData.items[0].track.name, artist: playlistData.items[0].track.artists.map(a => a.name).join(', ') };
-                    console.log(`➡️ Fallback : ${fallbackTracks.length} morceaux ajoutés depuis Top 50. Nouveau seed : ${lastSeedInfo.title}`);
-
-                    const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
-                        headers: { 'Authorization': 'Bearer ' + access_token }
-                    });
-                    const playingData = await playingRes.json();
-                    if ((!playingData.is_playing || forcePlay) && priorityQueue.length > 0) {
-                        const firstTrack = priorityQueue.shift();
-                        await fetch('https://api.spotify.com/v1/me/player/play', {
-                            method: 'PUT',
-                            headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ uris: [firstTrack.uri] })
-                        });
-                        console.log("▶️ Lecture fallback démarrée :", firstTrack.name);
-                    }
-                }
-                return;
-            }
-
-            const recData = await recRes.json();
-            if (recData.tracks && recData.tracks.length > 0) {
-                const newTracks = recData.tracks.map(track => ({
-                    uri: track.uri,
-                    name: track.name,
-                    artists: track.artists.map(a => a.name).join(', '),
-                    image: track.album.images[0]?.url || '',
-                    auto: true
-                }));
-                priorityQueue.push(...newTracks);
-                console.log("✅ Auto-fill : ajout de recommandations");
-            }
-        }
-
-        const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
-            headers: { 'Authorization': 'Bearer ' + access_token }
-        });
-        const playingData = await playingRes.json();
-        if ((!playingData.is_playing || forcePlay) && priorityQueue.length > 0) {
-            const firstTrack = priorityQueue.shift();
-            lastSeedTrack = firstTrack.uri.split(":").pop();
-            lastSeedInfo = { title: firstTrack.name, artist: firstTrack.artists };
-            await fetch('https://api.spotify.com/v1/me/player/play', {
-                method: 'PUT',
-                headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uris: [firstTrack.uri] })
-            });
-            console.log("▶️ Lecture auto démarrée :", firstTrack.name);
-        }
-    } catch (err) {
-        console.error("❌ Erreur autoFillQueue:", err);
-    }
-}
-
-// Vérification toutes les 5s
-setInterval(autoFillQueue, 5000);
-
-// --- Rediriger la racine vers le player
+// -----------------------------------------------------------------------------
+// Static files (player.html, guest.html…)
+// -----------------------------------------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, 'static')));
-app.get('/', (req, res) => res.redirect('/player.html'));
+const __dirname  = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, 'public'))); // place tes HTML dans /public
 
-app.listen(PORT, async () => {
-    console.log(`Server running on port ${PORT}`);
-    await refreshAccessToken();
-});
+// -----------------------------------------------------------------------------
+// Lancement serveur + boucle auto-fill
+// -----------------------------------------------------------------------------
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+setInterval(() => autoFillQueue(false), 20 * 1000); // vérifie la queue toutes les 20 s
