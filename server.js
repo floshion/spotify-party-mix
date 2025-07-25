@@ -1,6 +1,6 @@
 // server.js
 // -----------------------------------------------------------------------------
-// DJ Auto-mix v2 – compatible avec les API Spotify encore ouvertes (juillet 2025)
+// DJ Auto‑mix v2 – compatible avec les API Spotify encore ouvertes (juillet 2025)
 // -----------------------------------------------------------------------------
 
 import express from "express";
@@ -55,8 +55,10 @@ async function refreshAccessToken() {
     console.error("❌ Échec du refresh token :", data);
   }
 }
-// refresh toutes les 50 mn
-autoStart(refreshAccessToken, 50 * 60 * 1000);
+// refresh toutes les 50 mn
+// démarrage immédiat puis refresh toutes les 50 minutes
+refreshAccessToken();
+setInterval(refreshAccessToken, 50 * 60 * 1000);
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -69,7 +71,7 @@ async function validateTrack(id) {
   return res.ok;
 }
 
-// ► NOUVEAU : génère 3 titres « similaires » sans /recommendations
+// ► NOUVEAU : génère 3 titres « similaires » sans /recommendations
 async function fetchSimilarTracks(trackId, limit = 3) {
   // 1) détails du morceau (pour récupérer l’artiste)
   const trackRes = await fetch(
@@ -102,7 +104,7 @@ async function fetchSimilarTracks(trackId, limit = 3) {
     pool.push(...(tracks?.items || []));
   }
 
-  // 3B) fallback : top-tracks de l’artiste si pas de genre ou zéro résultat
+  // 3B) fallback : top‑tracks de l’artiste si pas de genre ou zéro résultat
   if (pool.length === 0) {
     const topRes = await fetch(
       `https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=FR`,
@@ -151,7 +153,7 @@ async function initSeedTrack() {
 }
 
 // -----------------------------------------------------------------------------
-// Auto-fill queue
+// Auto‑fill queue
 // -----------------------------------------------------------------------------
 async function autoFillQueue(forcePlay = false) {
   await refreshAccessToken();
@@ -161,7 +163,7 @@ async function autoFillQueue(forcePlay = false) {
     return;
   }
 
-  // Vérifie que la seed est valide ; sinon on prend le 1er titre Top 50
+  // Vérifie que la seed est valide ; sinon on prend le 1er titre Top 50
   const isValid = await validateTrack(lastSeedTrack);
   if (!isValid) {
     const plRes = await fetch(
@@ -183,7 +185,7 @@ async function autoFillQueue(forcePlay = false) {
     const newTracks = await fetchSimilarTracks(lastSeedTrack);
     if (newTracks.length) {
       priorityQueue.push(...newTracks);
-      console.log("✅ Auto-fill : 3 titres similaires ajoutés");
+      console.log("✅ Auto‑fill : 3 titres similaires ajoutés");
     } else {
       console.log("⚠️  Pas de titres similaires trouvés → fallback Top 50");
       const plRes = await fetch(
@@ -203,7 +205,7 @@ async function autoFillQueue(forcePlay = false) {
     }
   }
 
-  // Force lecture immédiate (bouton « forcer DJ auto »)
+  // Force lecture immédiate (bouton « forcer DJ auto »)
   if (forcePlay && priorityQueue.length) {
     const track = priorityQueue.shift();
 
@@ -265,7 +267,7 @@ app.post("/add-priority-track", async (req, res) => {
   const uri = req.query.uri;
   if (!uri) return res.status(400).json({ error: "No URI provided" });
 
-  // ► Purge des anciens « auto »
+  // ► Purge des anciens « auto »
   priorityQueue = priorityQueue.filter((t) => !t.auto);
 
   const trackId = uri.split(":").pop();
