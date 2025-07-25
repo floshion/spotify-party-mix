@@ -56,7 +56,7 @@ async function refreshAccessToken() {
   }
 }
 // refresh toutes les 50 mn
-// démarrage immédiat puis refresh toutes les 50 minutes
+// démarrage immédiat puis refresh toutes les 50 minutes
 refreshAccessToken();
 setInterval(refreshAccessToken, 50 * 60 * 1000);
 
