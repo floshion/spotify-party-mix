@@ -18,16 +18,17 @@
     .controls { display: flex; gap: 20px; margin-top: 20px; }
     .btn { background: #1DB954; border: none; padding: 15px 25px; border-radius: 50px; font-size: 18px; cursor: pointer; transition: 0.3s; }
     .btn:hover { background: #1ed760; }
-    .next { background: #333; }
-    .next:hover { background: #444; }
-    #skipPriority { background: #ff9800; margin-top: 20px; }
+    .next { background: #ff9800; }
+    .next:hover { background: #ffb84d; }
     .queue-container { flex: 1; background: #222; padding: 15px; border-radius: 10px; overflow-y: auto; max-height: 500px; }
     .queue-container h3 { text-align: center; margin-bottom: 10px; }
     #priorityQueueList { list-style: none; padding: 0; }
     #priorityQueueList li { display: flex; align-items: center; gap: 10px; background: #333; padding: 8px; border-radius: 5px; margin-bottom: 8px; }
     #priorityQueueList img { width: 50px; height: 50px; border-radius: 5px; }
-    .debug { margin-top: 30px; font-size: 14px; color: #888; background: #1c1c1c; padding: 10px; border-radius: 8px; width: 90%; max-width: 800px; }
     #errorMsg { color: #ff4444; font-size: 16px; margin-top: 10px; }
+    .progress-container { width: 100%; max-width: 320px; height: 8px; background: #333; border-radius: 4px; margin-top: 15px; }
+    .progress-bar { height: 100%; background: #1DB954; width: 0%; border-radius: 4px; }
+    .time-info { display: flex; justify-content: space-between; width: 100%; max-width: 320px; font-size: 14px; color: #aaa; margin-top: 5px; }
   </style>
 </head>
 <body>
@@ -43,14 +44,19 @@
     <!-- Player -->
     <div class="track-container">
       <img id="albumArt" src="" alt="Album cover">
-      <h2 id="trackName">Cliquez sur "Démarrer"…</h2>
+      <h2 id="trackName">Cliquez sur \"Démarrer\"…</h2>
       <p id="artistName"></p>
+      <div class="progress-container">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="time-info">
+        <span id="currentTime">0:00</span>
+        <span id="totalTime">0:00</span>
+      </div>
       <div class="controls">
         <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
         <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
       </div>
-      <button class="btn" id="skipPriority">⏩ Passer au prochain invité</button>
-      <button class="btn" id="forceAuto">🎛 Forcer DJ Auto</button>
       <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
       <p id="errorMsg"></p>
     </div>
@@ -62,21 +68,13 @@
     </div>
   </div>
 
-  <!-- Debug -->
-  <div class="debug">
-    <strong>DEBUG :</strong><br>
-    Seed ID : <span id="debugSeed">Inconnu</span><br>
-    Titre : <span id="debugSeedTitle">Inconnu</span> – <span id="debugSeedArtist"></span><br>
-    Taille de la file : <span id="debugQueueSize">0</span>
-  </div>
-
   <script>
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
       if (!data.access_token) {
-        document.getElementById("errorMsg").textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
-        throw new Error("Token invalide");
+        document.getElementById(\"errorMsg\").textContent = \"Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.\";
+        throw new Error(\"Token invalide\");
       }
       return data.access_token;
     }
@@ -84,97 +82,78 @@
     async function updatePriorityQueue() {
       const res = await fetch('/priority-queue');
       const data = await res.json();
-      const list = document.getElementById("priorityQueueList");
-      list.innerHTML = "";
-      document.getElementById("debugQueueSize").textContent = data.queue.length;
+      const list = document.getElementById(\"priorityQueueList\");
+      list.innerHTML = \"\";
       data.queue.forEach(track => {
-        const li = document.createElement("li");
-        const img = document.createElement("img");
+        const li = document.createElement(\"li\");
+        const img = document.createElement(\"img\");
         img.src = track.image;
-        const span = document.createElement("span");
-        span.textContent = `${track.name} – ${track.artists}` + (track.auto ? " (Auto)" : "");
+        const span = document.createElement(\"span\");
+        span.textContent = `${track.name} – ${track.artists}` + (track.auto ? \" (Auto)\" : \"\");
         li.appendChild(img); li.appendChild(span);
         list.appendChild(li);
       });
     }
 
-    async function updateDebugSeed() {
-      const res = await fetch('/debug-seed');
-      const data = await res.json();
-      document.getElementById("debugSeed").textContent = data.seed || "Inconnu";
-      document.getElementById("debugSeedTitle").textContent = data.title || "Inconnu";
-      document.getElementById("debugSeedArtist").textContent = data.artist || "";
-    }
-
-    document.getElementById("skipPriority").addEventListener("click", async () => {
-      await fetch('/play-priority', { method: "POST" });
-      updatePriorityQueue();
-    });
-
-    document.getElementById("forceAuto").addEventListener("click", async () => {
-      await fetch('/force-auto-fill', { method: "POST" });
-      updatePriorityQueue();
-      updateDebugSeed();
-    });
-
     let player;
     window.onSpotifyWebPlaybackSDKReady = () => {
-      document.getElementById("startBtn").addEventListener("click", async () => {
+      document.getElementById(\"startBtn\").addEventListener(\"click\", async () => {
         try {
           const token = await getToken();
           player = new Spotify.Player({ name: 'DJ Player', getOAuthToken: cb => { cb(token); }, volume: 1.0 });
 
           player.addListener('ready', ({ device_id }) => {
-            fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
-              method: "PUT",
+            fetch(\"https://api.spotify.com/v1/me/player/play?device_id=\" + device_id, {
+              method: \"PUT\",
               headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" })
+              body: JSON.stringify({ context_uri: \"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M\" })
             });
-            document.getElementById("playPauseBtn").disabled = false;
-            document.getElementById("nextBtn").disabled = false;
+            document.getElementById(\"playPauseBtn\").disabled = false;
+            document.getElementById(\"nextBtn\").disabled = false;
             updatePriorityQueue();
-            updateDebugSeed();
           });
 
-          player.addListener('initialization_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur init : " + message);
-          player.addListener('authentication_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur auth : " + message);
-          player.addListener('account_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur compte : " + message);
-          player.addListener('playback_error', ({ message }) => document.getElementById("errorMsg").textContent = "Erreur lecture : " + message);
+          player.addListener('initialization_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur init : \" + message);
+          player.addListener('authentication_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur auth : \" + message);
+          player.addListener('account_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur compte : \" + message);
+          player.addListener('playback_error', ({ message }) => document.getElementById(\"errorMsg\").textContent = \"Erreur lecture : \" + message);
 
           player.addListener('player_state_changed', state => {
             if (!state) return;
             const track = state.track_window.current_track;
-            document.getElementById("albumArt").src = track.album.images[0].url;
-            document.getElementById("trackName").textContent = track.name;
-            document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
+            document.getElementById(\"albumArt\").src = track.album.images[0].url;
+            document.getElementById(\"trackName\").textContent = track.name;
+            document.getElementById(\"artistName\").textContent = track.artists.map(a => a.name).join(', ');
+
+            // Progression
+            const position = state.position;
+            const duration = state.duration;
+            document.getElementById(\"progressBar\").style.width = ((position / duration) * 100) + \"%\";
+            document.getElementById(\"currentTime\").textContent = formatTime(position);
+            document.getElementById(\"totalTime\").textContent = formatTime(duration);
+
             updatePriorityQueue();
-            updateDebugSeed();
           });
 
-          setInterval(() => { updatePriorityQueue(); updateDebugSeed(); }, 5000);
-
           player.connect();
-          document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
-          document.getElementById("nextBtn").onclick = () => player.nextTrack();
-          document.getElementById("startBtn").style.display = "none";
-        } catch (e) {
-          console.error(e);
-        }
+          document.getElementById(\"playPauseBtn\").onclick = () => player.togglePlay();
+          document.getElementById(\"nextBtn\").onclick = async () => { await fetch('/play-priority', { method: \"POST\" }); updatePriorityQueue(); };
+          document.getElementById(\"startBtn\").style.display = \"none\";
+        } catch (e) { console.error(e); }
       });
     };
+
+    function formatTime(ms) {
+      const minutes = Math.floor(ms / 60000);
+      const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
+      return `${minutes}:${seconds}`;
+    }
   </script>
-  <script src="https://sdk.scdn.co/spotify-player.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src=\"https://sdk.scdn.co/spotify-player.js\"></script>
+  <script src=\"https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js\"></script>
   <script>
-    const guestUrl = window.location.origin + "/guest.html";
-    new QRCode(document.getElementById("qrcode"), {
-      text: guestUrl,
-      width: 200,
-      height: 200,
-      colorDark : "#ffffff",
-      colorLight : "#111111",
-      correctLevel : QRCode.CorrectLevel.H
-    });
+    const guestUrl = window.location.origin + \"/guest.html\";
+    new QRCode(document.getElementById(\"qrcode\"), { text: guestUrl, width: 200, height: 200, colorDark : \"#ffffff\", colorLight : \"#111111\", correctLevel : QRCode.CorrectLevel.H });
   </script>
 </body>
 </html>
