@@ -4,11 +4,13 @@
   <meta charset="UTF-8">
   <title>DJ Player - Spotify Party Mix</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="favicon_flo.png">
   <style>
     body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
     .main-container { display: flex; justify-content: space-between; width: 95%; max-width: 1200px; margin-top: 30px; }
     .qr-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     #qrcode { margin-bottom: 10px; }
+    .qr-container img { display: block; margin-top: 20px; width: 150px; border-radius: 50%; }
     .track-container { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
     .track-container img { width: 320px; height: 320px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.8); }
     .track-container h2 { font-size: 28px; margin: 15px 0 5px; }
@@ -28,11 +30,12 @@
 </head>
 <body>
   <div class="main-container">
-    <!-- QR code à gauche -->
+    <!-- QR code + Logo à gauche -->
     <div class="qr-container">
       <h3>Invitez vos amis</h3>
       <div id="qrcode"></div>
       <p style="color:#aaa; font-size:14px;">Scannez pour ajouter vos morceaux</p>
+      <img src="logo_flo_besset.png" alt="Flo BESSET">
     </div>
 
     <!-- Pochette + contrôles au centre -->
