@@ -281,7 +281,29 @@ app.post('/add-priority-track', async (req, res) => {
 
   res.json({ message: 'Track added + auto-fill', track: trackInfo, auto: autoTracks });
 });
+// Lecture du prochain morceau (bouton “next”)
+app.post('/play-priority', async (_req, res) => {
+  if (!priorityQueue.length) return res.status(400).json({ error: 'Queue vide' });
+  
+  const track = priorityQueue.shift();
+  lastSeedTrack = track.uri.split(':').pop();
+  lastSeedInfo  = { title: track.name, artist: track.artists };
 
+  await fetch('https://api.spotify.com/v1/me/player/play', {
+    method : 'PUT',
+    headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+    body   : JSON.stringify({ uris: [track.uri] })
+  });
+
+  // Complète la file après avoir joué
+  const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
+  if (missing > 0) {
+    const autoTracks = await fetchSimilarTracks(lastSeedTrack, missing);
+    priorityQueue.push(...autoTracks);
+  }
+
+  res.json({ message: 'Playing next track', track });
+});
 app.get('/priority-queue', (_req, res) => res.json({ queue: priorityQueue }));
 
 // -----------------------------------------------------------------------------
