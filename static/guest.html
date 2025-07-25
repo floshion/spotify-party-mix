@@ -24,10 +24,7 @@
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
-      if (data.error) {
-        window.location.href = '/login';
-        throw new Error("Non authentifié");
-      }
+      if (data.error) { window.location.href = '/login'; throw new Error("Non authentifié"); }
       return data.access_token;
     }
 
@@ -39,17 +36,9 @@
       return data.tracks.items;
     }
 
-    async function addTrackToQueue(uri, token) {
-      await fetch("https://api.spotify.com/v1/me/player/queue?uri=" + encodeURIComponent(uri), {
-        method: "POST",
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
-      // Skip direct vers ce morceau
-      await fetch("https://api.spotify.com/v1/me/player/next", {
-        method: "POST",
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
-      alert("Le morceau a été ajouté et passera en prochain !");
+    async function addTrackToPriority(uri) {
+      await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
+      alert("Morceau ajouté, il sera joué après le morceau actuel !");
     }
 
     document.getElementById("searchInput").addEventListener("input", async (e) => {
@@ -63,7 +52,7 @@
         const div = document.createElement("div");
         div.className = "result";
         div.innerHTML = `<img src="${track.album.images[0]?.url}" /><div><strong>${track.name}</strong><span>${track.artists.map(a => a.name).join(', ')}</span></div>`;
-        div.onclick = () => addTrackToQueue(track.uri, token);
+        div.onclick = () => addTrackToPriority(track.uri);
         resultsDiv.appendChild(div);
       });
     });
