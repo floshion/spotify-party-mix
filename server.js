@@ -301,7 +301,7 @@ app.post("/add-priority-track", async (req, res) => {
     auto   : autoTracks
   });
 });
-});
+
 
 app.post("/play-priority", async (_req, res) => {
   if (!priorityQueue.length) return res.status(400).json({ error: "Priority queue is empty" });
