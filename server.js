@@ -151,22 +151,37 @@ async function autoFillQueue(forcePlay = false) {
     if (!lastSeedTrack) {
       await initSeedTrack();
       if (!lastSeedTrack) {
-        console.log("Pas de seed disponible pour recommandations.");
+        console.log("⚠️ Pas de seed disponible pour recommandations.");
         return;
       }
     }
 
-    if (priorityQueue.length === 0) {  // SI VIDE → RAJOUTE 3 RECO
+    if (priorityQueue.length === 0) {
       const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
-      console.log("Requête recommandations :", url);
+      console.log("🎯 Requête recommandations :", url);
+
       const recRes = await fetch(url, {
         headers: { 'Authorization': 'Bearer ' + access_token }
       });
-      const recData = await recRes.json();
-      console.log("Réponse recommandations :", JSON.stringify(recData, null, 2));
+
+      if (!recRes.ok) {
+        const errText = await recRes.text();
+        console.error(`❌ Erreur Spotify (${recRes.status}) : ${errText}`);
+        return;
+      }
+
+      let recData;
+      try {
+        recData = await recRes.json();
+      } catch (err) {
+        console.error("❌ Impossible de parser la réponse recommandations :", err);
+        const rawText = await recRes.text();
+        console.log("Réponse brute :", rawText);
+        return;
+      }
 
       if (!recData.tracks || recData.tracks.length === 0) {
-        console.log("Aucune reco trouvée, fallback sur Top 50 France");
+        console.log("⚠️ Aucune reco trouvée → fallback Top 50 France");
         const playlistRes = await fetch('https://api.spotify.com/v1/playlists/37i9dQZF1DXcBWIGoYBM5M/tracks?limit=3', {
           headers: { 'Authorization': 'Bearer ' + access_token }
         });
@@ -183,7 +198,7 @@ async function autoFillQueue(forcePlay = false) {
           auto: true
         }));
         priorityQueue.push(...newTracks);
-        console.log("Auto-fill : ajout de recommandations");
+        console.log("✅ Auto-fill : ajout de recommandations");
       }
     }
 
@@ -200,10 +215,10 @@ async function autoFillQueue(forcePlay = false) {
         headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
         body: JSON.stringify({ uris: [firstTrack.uri] })
       });
-      console.log("Lecture auto démarrée :", firstTrack.name);
+      console.log("▶️ Lecture auto démarrée :", firstTrack.name);
     }
   } catch (err) {
-    console.error("Erreur autoFillQueue:", err);
+    console.error("❌ Erreur autoFillQueue:", err);
   }
 }
 
