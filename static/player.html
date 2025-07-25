@@ -2,87 +2,76 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>DJ Player – Playlist MUSIQUES</title>
+  <title>DJ Admin Player</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="favicon_flo.png">
   <style>
     body{background:#111;color:#fff;font-family:Arial,sans-serif;margin:0;padding:0;display:flex;flex-direction:column;align-items:center;min-height:100vh}
+    h1{margin:20px 0}
     .main-container{display:flex;justify-content:space-between;width:95%;max-width:1200px;margin-top:30px}
     .qr-container{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
     #qrcode{margin-bottom:10px}
     .qr-container .logo{display:block;margin-top:20px;width:150px;height:150px;border-radius:50%;object-fit:cover;background:#111}
-    .track-container{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center}
-    .track-container img{width:320px;height:320px;border-radius:15px;box-shadow:0 0 15px rgba(0,0,0,.8)}
-    .track-container h2{font-size:28px;margin:15px 0 5px}
-    .track-container p{font-size:20px;color:#ccc;margin:0}
-    .controls{display:flex;gap:20px;margin-top:20px}
-    .btn{background:#1DB954;border:none;padding:15px 25px;border-radius:50px;font-size:18px;cursor:pointer;transition:.3s}
+    .player-container{flex:2;display:flex;flex-direction:column;align-items:center;text-align:center}
+    .player-container img{width:320px;height:320px;border-radius:15px;box-shadow:0 0 15px rgba(0,0,0,.8)}
+    .player-container h2{font-size:28px;margin:15px 0 5px}
+    .player-container p{font-size:20px;color:#ccc;margin:0}
+    .progress-container{width:100%;max-width:320px;height:8px;background:#333;border-radius:4px;margin-top:15px}
+    .progress-bar{height:100%;background:#1DB954;width:0%;border-radius:4px}
+    .time-info{display:flex;justify-content:space-between;width:100%;max-width:320px;font-size:14px;color:#aaa;margin-top:5px}
+    .controls{margin-top:20px;display:flex;gap:10px}
+    .btn{background:#1DB954;color:#fff;border:none;padding:10px 20px;border-radius:5px;font-size:16px;cursor:pointer}
     .btn:hover{background:#1ed760}
-    .next{background:#ff9800}.next:hover{background:#ffb84d}
     .queue-container{flex:1;background:#222;padding:15px;border-radius:10px;overflow-y:auto;max-height:500px}
     .queue-container h3{text-align:center;margin-bottom:10px}
     #priorityQueueList{list-style:none;padding:0}
     #priorityQueueList li{display:flex;align-items:center;gap:10px;background:#333;padding:8px;border-radius:5px;margin-bottom:8px}
     #priorityQueueList img{width:50px;height:50px;border-radius:5px}
-    #errorMsg{color:#ff4444;font-size:16px;margin-top:10px}
-    .progress-container{width:100%;max-width:320px;height:8px;background:#333;border-radius:4px;margin-top:15px}
-    .progress-bar{height:100%;background:#1DB954;width:0%;border-radius:4px}
-    .time-info{display:flex;justify-content:space-between;width:100%;max-width:320px;font-size:14px;color:#aaa;margin-top:5px}
   </style>
 </head>
 <body>
+  <h1>DJ Admin Player</h1>
   <div class="main-container">
-    <!-- QR code + logo -->
+    <!-- QR code -->
     <div class="qr-container">
-      <h3>Invitez vos amis</h3>
+      <h3>Ajoutez vos morceaux</h3>
       <div id="qrcode"></div>
-      <p style="color:#aaa;font-size:14px">Scannez pour ajouter vos morceaux</p>
+      <p style="color:#aaa;font-size:14px">Scannez pour participer</p>
       <img src="logo_flo_besset.png" alt="Flo BESSET" class="logo">
     </div>
 
     <!-- Player -->
-    <div class="track-container">
+    <div class="player-container">
       <img id="albumArt" src="" alt="Album cover">
-      <h2 id="trackName">Cliquez sur 'Démarrer'…</h2>
+      <h2 id="trackName">Chargement…</h2>
       <p id="artistName"></p>
       <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
       <div class="time-info"><span id="currentTime">0:00</span><span id="totalTime">0:00</span></div>
       <div class="controls">
-        <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
-        <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
+        <button class="btn" id="playPauseBtn">⏯️ Play/Pause</button>
+        <button class="btn" id="nextBtn">⏭️ Suivant</button>
+        <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
+        <button class="btn" id="openDisplayBtn">📺 Mode TV</button>
       </div>
-      <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
-      <button class="btn" id="openDisplayBtn">📺 Mode TV</button>
-      <p id="errorMsg"></p>
     </div>
 
-    <!-- File invités -->
-    <div class="queue-container"><h3>Morceaux à venir :</h3><ul id="priorityQueueList"></ul></div>
+    <!-- File d’attente -->
+    <div class="queue-container"><h3>À venir :</h3><ul id="priorityQueueList"></ul></div>
   </div>
 
   <!-- Scripts -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script>
-    // ID fixe de la playlist MUSIQUES
-    const PLAYLIST_ID = '1g39kHQqy4XHxGGftDiUWb';
-
-    // Génération du QR Code guest
     const guestUrl = window.location.origin + '/guest.html';
     new QRCode(document.getElementById('qrcode'), { text: guestUrl, width: 200, height: 200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
 
-    // Récupérer le token Spotify exposé par le serveur
     async function getToken(){
       const res = await fetch('/token');
       const data = await res.json();
-      if(!data.access_token){
-        document.getElementById('errorMsg').textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
-        throw new Error('Token invalide');
-      }
       return data.access_token;
     }
 
-    // Afficher la file d’attente
     async function updatePriorityQueue(){
       const res  = await fetch('/priority-queue');
       const data = await res.json();
@@ -98,69 +87,77 @@
         list.appendChild(li);
       });
     }
-    setInterval(updatePriorityQueue, 5000);
 
-    // Format mm:ss
     function formatTime(ms){
       const m = Math.floor(ms/60000);
       const s = Math.floor((ms%60000)/1000).toString().padStart(2,'0');
       return `${m}:${s}`;
     }
 
-    let player;
+    async function updateNowPlaying() {
+      const token = await getToken();
+      const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.item) return;
+      document.getElementById('albumArt').src = data.item.album.images[0].url;
+      document.getElementById('trackName').textContent = data.item.name;
+      document.getElementById('artistName').textContent = data.item.artists.map(a=>a.name).join(', ');
+      const position = data.progress_ms;
+      const duration = data.item.duration_ms;
+      document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
+      document.getElementById('currentTime').textContent = formatTime(position);
+      document.getElementById('totalTime').textContent   = formatTime(duration);
+    }
+
+    setInterval(updateNowPlaying, 1000);
+    setInterval(updatePriorityQueue, 5000);
+    updateNowPlaying();
+    updatePriorityQueue();
+
+    // Activation crossfade
+    async function enableCrossfade(duration = 5000) {
+      const tokenRes = await fetch('/token');
+      const { access_token } = await tokenRes.json();
+      await fetch('https://api.spotify.com/v1/me/player', {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Bearer ' + access_token,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          playback_settings: { crossfade_state: { duration_ms: duration } }
+        })
+      });
+      console.log('🎚️ Crossfade activé :', duration/1000, 'secondes');
+    }
+
     window.onSpotifyWebPlaybackSDKReady = () => {
-      document.getElementById('startBtn').addEventListener('click', async () => {
-        try{
-          const token = await getToken();
-          player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
+      getToken().then(token => {
+        const player = new Spotify.Player({
+          name: 'Party DJ Player',
+          getOAuthToken: cb => { cb(token); },
+          volume: 0.8
+        });
 
-          // Device prêt : on lance la playlist MUSIQUES
-          player.addListener('ready', ({ device_id }) => {
-            fetch(`https://api.spotify.com/v1/me/player/play?device_id=${device_id}`,{
-              method :'PUT',
-              headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-              body   :JSON.stringify({ context_uri:`spotify:playlist:${PLAYLIST_ID}` })
-            });
-            document.getElementById('playPauseBtn').disabled = false;
-            document.getElementById('nextBtn').disabled      = false;
-            updatePriorityQueue();
-          });
+        // Connexion du player
+        player.connect().then(success => {
+          if (success) {
+            enableCrossfade(5000); // Crossfade 5s
+          }
+        });
 
-          // Met à jour la barre de progression chaque seconde
-          setInterval(async ()=>{
-            const state = await player.getCurrentState();
-            if(state && !state.paused){
-              const { position, duration } = state;
-              document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
-              document.getElementById('currentTime').textContent = formatTime(position);
-              document.getElementById('totalTime').textContent   = formatTime(duration);
-            }
-          },1000);
+        // Boutons
+        document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
+        document.getElementById('nextBtn').onclick      = async () => { await fetch('/play-priority', { method:'POST' }); updatePriorityQueue(); };
+        document.getElementById('startBtn').style.display='none';
 
-          // Changement de piste (ou play/pause)
-          player.addListener('player_state_changed', state => {
-            if(!state) return;
-            const track = state.track_window.current_track;
-            document.getElementById('albumArt').src          = track.album.images[0].url;
-            document.getElementById('trackName').textContent = track.name;
-            document.getElementById('artistName').textContent= track.artists.map(a=>a.name).join(', ');
-
-            const { position, duration } = state;
-            document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
-            document.getElementById('currentTime').textContent = formatTime(position);
-            document.getElementById('totalTime').textContent   = formatTime(duration);
-
-            updatePriorityQueue();
-          });
-
-          player.connect();
-          document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
-          document.getElementById('nextBtn').onclick      = async () => { await fetch('/play-priority', { method:'POST' }); updatePriorityQueue(); };
-          document.getElementById('startBtn').style.display='none';
-          document.getElementById('openDisplayBtn').addEventListener('click', () => {
-  window.open('/display.html', '_blank');
-});
-        }catch(e){ console.error(e); }
+        // Mode TV
+        document.getElementById('openDisplayBtn').addEventListener('click', () => {
+          window.open('/display.html', '_blank');
+        });
       });
     };
   </script>
