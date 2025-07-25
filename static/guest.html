@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Invités – Party Mix</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f9f9fb;
+        color: #333;
+      }
+      header {
+        background: #1db954;
+        color: white;
+        padding: 1rem;
+        text-align: center;
+      }
+      main {
+        padding: 1rem;
+      }
+      h2 {
+        margin-top: 1rem;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+      }
+      li {
+        margin-bottom: 0.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      button {
+        cursor: pointer;
+        border: none;
+        padding: 0.4rem 0.8rem;
+        border-radius: 4px;
+        background: #1976d2;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Choisis la musique !</h1>
+    </header>
+    <main>
+      <section>
+        <h2>En cours</h2>
+        <div id="current-track">Chargement…</div>
+      </section>
+      <section>
+        <h2>À venir</h2>
+        <ul id="queue-list"></ul>
+      </section>
+      <section>
+        <h2>Recherche</h2>
+        <input type="text" id="search-input" placeholder="Tape un titre ou un artiste" style="width: 100%; padding: 0.5rem;" />
+        <ul id="search-results"></ul>
+      </section>
+    </main>
+    <script>
+      async function fetchCurrentAndQueue() {
+        try {
+          const [currentRes, queueRes] = await Promise.all([
+            fetch("/api/current"),
+            fetch("/api/queue"),
+          ]);
+          const current = await currentRes.json();
+          const queue = await queueRes.json();
+          updateCurrent(current);
+          updateQueue(queue);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      function updateCurrent(track) {
+        const el = document.getElementById("current-track");
+        if (!track || !track.id) {
+          el.textContent = "Aucune musique pour l'instant";
+        } else {
+          el.textContent = `${track.title} – ${track.artist}`;
+        }
+      }
+
+      function updateQueue(list) {
+        const ul = document.getElementById("queue-list");
+        ul.innerHTML = "";
+        list.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = `${item.title} – ${item.artist}`;
+          ul.appendChild(li);
+        });
+      }
+
+      async function searchTracks(query) {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        const ul = document.getElementById("search-results");
+        ul.innerHTML = "";
+        data.forEach((track) => {
+          const li = document.createElement("li");
+          li.textContent = `${track.title} – ${track.artist}`;
+          const btn = document.createElement("button");
+          btn.textContent = "Ajouter";
+          btn.onclick = async () => {
+            await fetch("/api/add", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: track.id, title: track.title, artist: track.artist, uri: track.uri }),
+            });
+            document.getElementById("search-input").value = "";
+            ul.innerHTML = "";
+            fetchCurrentAndQueue();
+          };
+          li.appendChild(btn);
+          ul.appendChild(li);
+        });
+      }
+
+      document.getElementById("search-input").addEventListener("input", (e) => {
+        const q = e.target.value.trim();
+        if (q.length >= 2) {
+          searchTracks(q);
+        } else {
+          document.getElementById("search-results").innerHTML = "";
+        }
+      });
+
+      window.addEventListener("load", () => {
+        fetchCurrentAndQueue();
+        setInterval(fetchCurrentAndQueue, 5000);
+      });
+    </script>
+  </body>
+</html>

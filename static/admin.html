@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DJ Admin – Party Mix</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f4f4f8;
+        color: #333;
+      }
+      header {
+        background: #1db954;
+        color: white;
+        padding: 1rem;
+        text-align: center;
+      }
+      main {
+        padding: 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2rem;
+      }
+      .panel {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        padding: 1rem;
+        flex: 1 1 300px;
+      }
+      h2 {
+        margin-top: 0;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+      }
+      li {
+        margin-bottom: 0.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      button {
+        cursor: pointer;
+        border: none;
+        padding: 0.4rem 0.8rem;
+        border-radius: 4px;
+      }
+      .btn-play {
+        background: #1db954;
+        color: white;
+      }
+      .btn-skip {
+        background: #ff5252;
+        color: white;
+      }
+      .btn-remove {
+        background: #ff9800;
+        color: white;
+      }
+      .btn-add {
+        background: #1976d2;
+        color: white;
+      }
+      #search-results button {
+        margin-left: 0.5rem;
+      }
+      .info {
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Interface DJ / Admin</h1>
+    </header>
+    <main>
+      <div class="panel" style="flex-basis: 100%">
+        <p class="info">
+          Connecte‑toi à ton compte Spotify Premium pour contrôler la lecture.
+          Les invités n'ont pas besoin de compte Spotify.
+        </p>
+        <button id="login-btn" class="btn-play">Se connecter à Spotify</button>
+      </div>
+      <div class="panel">
+        <h2>Lecture en cours</h2>
+        <div id="current-track">Chargement…</div>
+        <button id="skip-btn" class="btn-skip">Passer au morceau suivant</button>
+      </div>
+      <div class="panel">
+        <h2>File d'attente</h2>
+        <ul id="queue-list"></ul>
+      </div>
+      <div class="panel">
+        <h2>Recherche de morceaux</h2>
+        <input type="text" id="search-input" placeholder="Chercher une chanson" style="width: 100%; padding: 0.5rem;" />
+        <ul id="search-results"></ul>
+      </div>
+    </main>
+    <!-- Spotify Web Playback SDK -->
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+    <script>
+      /*
+       * DJ Admin script
+       *
+       * Handles authentication with Spotify (implicit grant flow), creates
+       * a Web Playback SDK player, polls the server for the current track and
+       * queue, and allows searching/adding/removing tracks. Playback
+       * commands are sent directly to the Spotify API using the admin's
+       * access token.
+       */
+      const clientId = "c785d51978c7481fb05c6781cea3e9fa";
+      const redirectUri = window.location.origin + window.location.pathname; // redirect back to this page
+      const scopes = [
+        "streaming",
+        "user-read-playback-state",
+        "user-modify-playback-state",
+      ];
+
+      let accessToken = null;
+      let deviceId = null;
+      let player = null;
+
+      function parseHashParams() {
+        const hash = window.location.hash.substring(1);
+        const params = {};
+        hash.split("&").forEach((part) => {
+          const [key, value] = part.split("=");
+          params[key] = decodeURIComponent(value);
+        });
+        return params;
+      }
+
+      function login() {
+        const authUrl =
+          "https://accounts.spotify.com/authorize?" +
+          new URLSearchParams({
+            client_id: clientId,
+            response_type: "token",
+            redirect_uri: redirectUri,
+            scope: scopes.join(" "),
+          });
+        window.location = authUrl;
+      }
+
+      function setupPlayer() {
+        if (!accessToken) return;
+        window.onSpotifyWebPlaybackSDKReady = () => {
+          player = new Spotify.Player({
+            name: "Party DJ Player",
+            getOAuthToken: (cb) => {
+              cb(accessToken);
+            },
+            volume: 1.0,
+          });
+          // Error handling
+          player.addListener("initialization_error", ({ message }) => {
+            console.error(message);
+          });
+          player.addListener("authentication_error", ({ message }) => {
+            console.error(message);
+          });
+          player.addListener("account_error", ({ message }) => {
+            console.error(message);
+          });
+          player.addListener("playback_error", ({ message }) => {
+            console.error(message);
+          });
+          // Ready
+          player.addListener("ready", ({ device_id }) => {
+            deviceId = device_id;
+            console.log("Ready with Device ID", device_id);
+            // Transfer playback to our player
+            transferPlayback();
+          });
+          // Not Ready
+          player.addListener("not_ready", ({ device_id }) => {
+            console.log("Device ID has gone offline", device_id);
+          });
+          // Playback state changed
+          player.addListener("player_state_changed", (state) => {
+            if (!state) return;
+            const { position, duration, paused, track_window } = state;
+            // If track ended (position is near end and paused), skip to next
+            if (paused && position > 0 && position + 1000 >= duration) {
+              skipTrack();
+            }
+          });
+          player.connect();
+        };
+      }
+
+      async function transferPlayback() {
+        if (!accessToken || !deviceId) return;
+        await fetch("https://api.spotify.com/v1/me/player", {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ device_ids: [deviceId], play: false }),
+        });
+      }
+
+      async function playTrack(track) {
+        if (!accessToken || !deviceId) return;
+        try {
+          await fetch(
+            `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,
+            {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${accessToken}` },
+              body: JSON.stringify({ uris: [track.uri] }),
+            }
+          );
+        } catch (err) {
+          console.error("Failed to start playback", err);
+        }
+      }
+
+      async function fetchCurrentAndQueue() {
+        try {
+          const [currentRes, queueRes] = await Promise.all([
+            fetch("/api/current"),
+            fetch("/api/queue"),
+          ]);
+          const current = await currentRes.json();
+          const queue = await queueRes.json();
+          updateCurrentTrack(current);
+          updateQueue(queue);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      function updateCurrentTrack(track) {
+        const el = document.getElementById("current-track");
+        if (!track || !track.id) {
+          el.textContent = "Aucun morceau en cours";
+          return;
+        }
+        el.textContent = `${track.title} – ${track.artist}`;
+        // Trigger playback if necessary
+        playTrack(track);
+      }
+
+      function updateQueue(list) {
+        const ul = document.getElementById("queue-list");
+        ul.innerHTML = "";
+        list.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = `${item.title} – ${item.artist}`;
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "btn-remove";
+          removeBtn.textContent = "Supprimer";
+          removeBtn.onclick = async () => {
+            await fetch("/api/admin/remove", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: item.id }),
+            });
+            fetchCurrentAndQueue();
+          };
+          li.appendChild(removeBtn);
+          ul.appendChild(li);
+        });
+      }
+
+      async function searchTracks(query) {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        const ul = document.getElementById("search-results");
+        ul.innerHTML = "";
+        data.forEach((track) => {
+          const li = document.createElement("li");
+          li.textContent = `${track.title} – ${track.artist}`;
+          const addBtn = document.createElement("button");
+          addBtn.className = "btn-add";
+          addBtn.textContent = "Ajouter";
+          addBtn.onclick = async () => {
+            await fetch("/api/add", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: track.id,
+                title: track.title,
+                artist: track.artist,
+                uri: track.uri,
+              }),
+            });
+            document.getElementById("search-input").value = "";
+            ul.innerHTML = "";
+            fetchCurrentAndQueue();
+          };
+          li.appendChild(addBtn);
+          ul.appendChild(li);
+        });
+      }
+
+      async function skipTrack() {
+        await fetch("/api/admin/next", { method: "POST" });
+        fetchCurrentAndQueue();
+      }
+
+      document.getElementById("login-btn").addEventListener("click", login);
+      document.getElementById("skip-btn").addEventListener("click", skipTrack);
+      document.getElementById("search-input").addEventListener("input", (e) => {
+        const q = e.target.value.trim();
+        if (q.length >= 2) {
+          searchTracks(q);
+        } else {
+          document.getElementById("search-results").innerHTML = "";
+        }
+      });
+
+      // Extract token from hash if present
+      window.addEventListener("load", () => {
+        const params = parseHashParams();
+        if (params.access_token) {
+          accessToken = params.access_token;
+          // Remove hash from URL
+          history.replaceState({}, document.title, redirectUri);
+          setupPlayer();
+        }
+        fetchCurrentAndQueue();
+        // Poll every 5 s to update queue and current track
+        setInterval(fetchCurrentAndQueue, 5000);
+      });
+    </script>
+  </body>
+</html>
