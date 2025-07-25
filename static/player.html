@@ -71,7 +71,8 @@
   <!-- Bloc debug -->
   <div class="debug">
     <strong>DEBUG :</strong><br>
-    Seed actuel : <span id="debugSeed">Inconnu</span><br>
+    Seed ID : <span id="debugSeed">Inconnu</span><br>
+    Titre : <span id="debugSeedTitle">Inconnu</span> – <span id="debugSeedArtist"></span><br>
     Taille de la file : <span id="debugQueueSize">0</span>
   </div>
 
@@ -104,6 +105,8 @@
       const res = await fetch('/debug-seed');
       const data = await res.json();
       document.getElementById("debugSeed").textContent = data.seed || "Inconnu";
+      document.getElementById("debugSeedTitle").textContent = data.title || "Inconnu";
+      document.getElementById("debugSeedArtist").textContent = data.artist || "";
     }
 
     document.getElementById("skipPriority").addEventListener("click", async () => {
