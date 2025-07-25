@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>DJ – Mode TV</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="favicon_flo.png">
+  <style>
+    body {
+      background:#000;
+      color:#fff;
+      font-family:Arial,sans-serif;
+      margin:0;
+      padding:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      height:100vh;
+    }
+    .container {
+      display:flex;
+      flex-direction:row;
+      justify-content:space-between;
+      width:95%;
+      max-width:1800px;
+      gap:50px;
+    }
+    .qr-container {
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+    }
+    #qrcode {margin-bottom:20px;}
+    .qr-container .logo {
+      margin-top:30px;
+      width:200px;
+      height:200px;
+      border-radius:50%;
+      object-fit:cover;
+    }
+    .track-container {
+      flex:2;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      text-align:center;
+    }
+    .track-container img {
+      width:500px;
+      height:500px;
+      border-radius:25px;
+      box-shadow:0 0 25px rgba(0,0,0,.8);
+    }
+    .track-container h2 {
+      font-size:50px;
+      margin:25px 0 10px;
+    }
+    .track-container p {
+      font-size:30px;
+      color:#ccc;
+      margin:0 0 20px;
+    }
+    .progress-container {
+      width:100%;
+      max-width:500px;
+      height:15px;
+      background:#333;
+      border-radius:8px;
+      margin-top:15px;
+    }
+    .progress-bar {
+      height:100%;
+      background:#1DB954;
+      width:0%;
+      border-radius:8px;
+    }
+    .time-info {
+      display:flex;
+      justify-content:space-between;
+      width:100%;
+      max-width:500px;
+      font-size:22px;
+      color:#aaa;
+      margin-top:8px;
+    }
+    .queue-container {
+      flex:1;
+      background:#111;
+      padding:20px;
+      border-radius:15px;
+      max-height:90vh;
+      overflow-y:auto;
+    }
+    .queue-container h3 {
+      text-align:center;
+      margin-bottom:20px;
+      font-size:32px;
+    }
+    #priorityQueueList {
+      list-style:none;
+      padding:0;
+    }
+    #priorityQueueList li {
+      display:flex;
+      align-items:center;
+      gap:15px;
+      background:#222;
+      padding:15px;
+      border-radius:10px;
+      margin-bottom:15px;
+      font-size:24px;
+    }
+    #priorityQueueList img {
+      width:80px;
+      height:80px;
+      border-radius:10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- QR -->
+    <div class="qr-container">
+      <h3 style="font-size:36px;">Ajoutez vos morceaux</h3>
+      <div id="qrcode"></div>
+      <p style="color:#aaa;font-size:22px;">Scannez pour participer</p>
+      <img src="logo_flo_besset.png" alt="Logo" class="logo">
+    </div>
+
+    <!-- Piste en cours -->
+    <div class="track-container">
+      <img id="albumArt" src="" alt="Album cover">
+      <h2 id="trackName">Chargement…</h2>
+      <p id="artistName"></p>
+      <div class="progress-container">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="time-info">
+        <span id="currentTime">0:00</span>
+        <span id="totalTime">0:00</span>
+      </div>
+    </div>
+
+    <!-- File d'attente -->
+    <div class="queue-container">
+      <h3>À venir</h3>
+      <ul id="priorityQueueList"></ul>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    const guestUrl = window.location.origin + '/guest.html';
+    new QRCode(document.getElementById('qrcode'), {
+      text: guestUrl, width: 300, height: 300,
+      colorDark:'#ffffff', colorLight:'#000000',
+      correctLevel:QRCode.CorrectLevel.H
+    });
+
+    async function getToken(){
+      const res = await fetch('/token');
+      const data = await res.json();
+      return data.access_token;
+    }
+
+    async function updatePriorityQueue(){
+      const res  = await fetch('/priority-queue');
+      const data = await res.json();
+      const list = document.getElementById('priorityQueueList');
+      list.innerHTML = '';
+      data.queue.forEach(track=>{
+        const li  = document.createElement('li');
+        const img = document.createElement('img');
+        img.src   = track.image;
+        const span= document.createElement('span');
+        span.textContent = `${track.name} – ${track.artists}`;
+        li.appendChild(img); li.appendChild(span);
+        list.appendChild(li);
+      });
+    }
+
+    function formatTime(ms){
+      const m = Math.floor(ms/60000);
+      const s = Math.floor((ms%60000)/1000).toString().padStart(2,'0');
+      return `${m}:${s}`;
+    }
+
+    async function updateNowPlaying() {
+      const token = await getToken();
+      const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.item) return;
+      document.getElementById('albumArt').src = data.item.album.images[0].url;
+      document.getElementById('trackName').textContent = data.item.name;
+      document.getElementById('artistName').textContent = data.item.artists.map(a=>a.name).join(', ');
+      const position = data.progress_ms;
+      const duration = data.item.duration_ms;
+      document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
+      document.getElementById('currentTime').textContent = formatTime(position);
+      document.getElementById('totalTime').textContent   = formatTime(duration);
+    }
+
+    setInterval(updateNowPlaying, 1000);
+    setInterval(updatePriorityQueue, 5000);
+    updateNowPlaying();
+    updatePriorityQueue();
+  </script>
+</body>
+</html>
