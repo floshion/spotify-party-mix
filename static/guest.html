@@ -6,13 +6,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { background: #0d0d0d; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; }
-    header { display: flex; align-items: center; justify-content: center; padding: 15px; background: #1c1c1e; border-bottom: 1px solid #333; }
+    header { display: flex; align-items: center; justify-content: center; padding: 15px; background: #1c1c1e; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 1000; }
     header img { position: absolute; left: 15px; width: 40px; height: 40px; border-radius: 50%; }
     header h1 { font-size: 20px; margin: 0; color: #fff; }
+
     .now-playing { text-align: center; padding: 20px; }
     .now-playing img { width: 200px; height: 200px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.7); }
     .now-playing h2 { font-size: 22px; margin: 15px 0 5px; }
     .now-playing p { font-size: 16px; color: #aaa; margin: 0; }
+    .progress-container { width: 80%; height: 6px; background: #333; border-radius: 3px; margin: 10px auto; position: relative; }
+    .progress-bar { height: 100%; background: #1DB954; width: 0%; border-radius: 3px; }
+    .time-info { display: flex; justify-content: space-between; width: 80%; margin: 0 auto; font-size: 12px; color: #aaa; }
+
+    .search-bar { padding: 10px 15px; }
+    .search-bar input { width: 100%; padding: 12px 15px; font-size: 16px; border-radius: 25px; border: none; outline: none; background: #2c2c2e; color: #fff; }
+
     .queue { padding: 15px; }
     .queue h3 { font-size: 18px; margin-bottom: 10px; }
     .queue-item { display: flex; align-items: center; padding: 8px; background: #1c1c1e; border-radius: 10px; margin-bottom: 8px; }
@@ -20,14 +28,19 @@
     .queue-item div { flex: 1; }
     .queue-item strong { font-size: 16px; display: block; }
     .queue-item span { font-size: 14px; color: #aaa; }
-    .search-bar { padding: 15px; }
-    .search-bar input { width: 100%; padding: 12px 15px; font-size: 16px; border-radius: 25px; border: none; outline: none; background: #2c2c2e; color: #fff; }
+
+    /* Modal résultats */
+    .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(13,13,13,0.95); z-index: 2000; display: none; flex-direction: column; }
+    .modal-header { padding: 10px; }
+    .modal-header input { width: 100%; padding: 12px 15px; font-size: 16px; border-radius: 25px; border: none; outline: none; background: #2c2c2e; color: #fff; }
+    .modal-results { flex: 1; overflow-y: auto; padding: 10px; }
     .result { display: flex; align-items: center; background: #1c1c1e; padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
     .result:hover { background: #2c2c2e; }
     .result img { width: 50px; height: 50px; border-radius: 8px; margin-right: 12px; }
     .result div { flex: 1; }
     .result strong { font-size: 16px; display: block; }
     .result span { font-size: 14px; color: #aaa; }
+    .close-btn { background: none; border: none; color: #fff; font-size: 20px; position: absolute; right: 15px; top: 15px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -40,6 +53,17 @@
     <img id="currentArt" src="" alt="Album">
     <h2 id="currentTitle">Aucun morceau en cours</h2>
     <p id="currentArtist"></p>
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="time-info">
+      <span id="currentTime">0:00</span>
+      <span id="totalTime">0:00</span>
+    </div>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="openSearch" placeholder="Rechercher un titre..." readonly />
   </div>
 
   <div class="queue">
@@ -47,10 +71,14 @@
     <div id="queueList"></div>
   </div>
 
-  <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="Rechercher un titre..." />
+  <!-- Modal Recherche -->
+  <div class="modal" id="searchModal">
+    <button class="close-btn" id="closeModal">&times;</button>
+    <div class="modal-header">
+      <input type="text" id="searchInput" placeholder="Rechercher un titre..." autofocus />
+    </div>
+    <div class="modal-results" id="results"></div>
   </div>
-  <div id="results"></div>
 
   <script>
     async function getToken() {
@@ -80,6 +108,11 @@
         document.getElementById('currentArt').src = data.item.album.images[0]?.url || '';
         document.getElementById('currentTitle').textContent = data.item.name;
         document.getElementById('currentArtist').textContent = data.item.artists.map(a => a.name).join(', ');
+        const position = data.progress_ms;
+        const duration = data.item.duration_ms;
+        document.getElementById("progressBar").style.width = ((position / duration) * 100) + "%";
+        document.getElementById("currentTime").textContent = formatTime(position);
+        document.getElementById("totalTime").textContent = formatTime(duration);
       }
     }
 
@@ -109,6 +142,15 @@
       updateQueue();
     }
 
+    document.getElementById("openSearch").addEventListener("click", () => {
+      document.getElementById("searchModal").style.display = "flex";
+      document.getElementById("searchInput").focus();
+    });
+
+    document.getElementById("closeModal").addEventListener("click", () => {
+      document.getElementById("searchModal").style.display = "none";
+    });
+
     document.getElementById("searchInput").addEventListener("input", async (e) => {
       const query = e.target.value;
       if (query.length < 2) return;
@@ -125,8 +167,14 @@
       });
     });
 
-    // Actualiser en boucle
-    setInterval(updateNowPlaying, 5000);
+    function formatTime(ms) {
+      const minutes = Math.floor(ms / 60000);
+      const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
+      return `${minutes}:${seconds}`;
+    }
+
+    // Boucles de mise à jour
+    setInterval(updateNowPlaying, 1000);
     setInterval(updateQueue, 5000);
     updateNowPlaying();
     updateQueue();
