@@ -1,142 +1,72 @@
 <!DOCTYPE html>
 <html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Invités – Party Mix</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-        background: #f9f9fb;
-        color: #333;
-      }
-      header {
-        background: #1db954;
-        color: white;
-        padding: 1rem;
-        text-align: center;
-      }
-      main {
-        padding: 1rem;
-      }
-      h2 {
-        margin-top: 1rem;
-      }
-      ul {
-        list-style: none;
-        padding: 0;
-      }
-      li {
-        margin-bottom: 0.5rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      button {
-        cursor: pointer;
-        border: none;
-        padding: 0.4rem 0.8rem;
-        border-radius: 4px;
-        background: #1976d2;
-        color: white;
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>Choisis la musique !</h1>
-    </header>
-    <main>
-      <section>
-        <h2>En cours</h2>
-        <div id="current-track">Chargement…</div>
-      </section>
-      <section>
-        <h2>À venir</h2>
-        <ul id="queue-list"></ul>
-      </section>
-      <section>
-        <h2>Recherche</h2>
-        <input type="text" id="search-input" placeholder="Tape un titre ou un artiste" style="width: 100%; padding: 0.5rem;" />
-        <ul id="search-results"></ul>
-      </section>
-    </main>
-    <script>
-      async function fetchCurrentAndQueue() {
-        try {
-          const [currentRes, queueRes] = await Promise.all([
-            fetch("/api/current"),
-            fetch("/api/queue"),
-          ]);
-          const current = await currentRes.json();
-          const queue = await queueRes.json();
-          updateCurrent(current);
-          updateQueue(queue);
-        } catch (err) {
-          console.error(err);
-        }
-      }
+<head>
+  <meta charset="UTF-8">
+  <title>Ajouter un morceau</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 20px; }
+    input { width: 100%; padding: 12px; font-size: 18px; border: none; border-radius: 8px; margin-bottom: 20px; }
+    .result { display: flex; align-items: center; background: #222; padding: 10px; border-radius: 8px; margin-bottom: 10px; cursor: pointer; }
+    .result img { width: 50px; height: 50px; border-radius: 5px; margin-right: 15px; }
+    .result div { flex: 1; }
+    .result strong { display: block; font-size: 16px; }
+    .result span { font-size: 14px; color: #aaa; }
+  </style>
+</head>
+<body>
+  <h1>Ajouter un morceau</h1>
+  <input type="text" id="searchInput" placeholder="Rechercher un titre..." />
+  <div id="results"></div>
 
-      function updateCurrent(track) {
-        const el = document.getElementById("current-track");
-        if (!track || !track.id) {
-          el.textContent = "Aucune musique pour l'instant";
-        } else {
-          el.textContent = `${track.title} – ${track.artist}`;
-        }
+  <script>
+    async function getToken() {
+      const res = await fetch('/token');
+      const data = await res.json();
+      if (data.error) {
+        window.location.href = '/login';
+        throw new Error("Non authentifié");
       }
+      return data.access_token;
+    }
 
-      function updateQueue(list) {
-        const ul = document.getElementById("queue-list");
-        ul.innerHTML = "";
-        list.forEach((item) => {
-          const li = document.createElement("li");
-          li.textContent = `${item.title} – ${item.artist}`;
-          ul.appendChild(li);
-        });
-      }
-
-      async function searchTracks(query) {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-        const data = await res.json();
-        const ul = document.getElementById("search-results");
-        ul.innerHTML = "";
-        data.forEach((track) => {
-          const li = document.createElement("li");
-          li.textContent = `${track.title} – ${track.artist}`;
-          const btn = document.createElement("button");
-          btn.textContent = "Ajouter";
-          btn.onclick = async () => {
-            await fetch("/api/add", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: track.id, title: track.title, artist: track.artist, uri: track.uri }),
-            });
-            document.getElementById("search-input").value = "";
-            ul.innerHTML = "";
-            fetchCurrentAndQueue();
-          };
-          li.appendChild(btn);
-          ul.appendChild(li);
-        });
-      }
-
-      document.getElementById("search-input").addEventListener("input", (e) => {
-        const q = e.target.value.trim();
-        if (q.length >= 2) {
-          searchTracks(q);
-        } else {
-          document.getElementById("search-results").innerHTML = "";
-        }
+    async function searchTracks(query, token) {
+      const res = await fetch("https://api.spotify.com/v1/search?q=" + encodeURIComponent(query) + "&type=track&limit=10", {
+        headers: { 'Authorization': 'Bearer ' + token }
       });
+      const data = await res.json();
+      return data.tracks.items;
+    }
 
-      window.addEventListener("load", () => {
-        fetchCurrentAndQueue();
-        setInterval(fetchCurrentAndQueue, 5000);
+    async function addTrackToQueue(uri, token) {
+      await fetch("https://api.spotify.com/v1/me/player/queue?uri=" + encodeURIComponent(uri), {
+        method: "POST",
+        headers: { 'Authorization': 'Bearer ' + token }
       });
-    </script>
-  </body>
+      // Skip direct vers ce morceau
+      await fetch("https://api.spotify.com/v1/me/player/next", {
+        method: "POST",
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      alert("Le morceau a été ajouté et passera en prochain !");
+    }
+
+    document.getElementById("searchInput").addEventListener("input", async (e) => {
+      const query = e.target.value;
+      if (query.length < 2) return;
+      const token = await getToken();
+      const tracks = await searchTracks(query, token);
+      const resultsDiv = document.getElementById("results");
+      resultsDiv.innerHTML = "";
+      tracks.forEach(track => {
+        const div = document.createElement("div");
+        div.className = "result";
+        div.innerHTML = `<img src="${track.album.images[0]?.url}" /><div><strong>${track.name}</strong><span>${track.artists.map(a => a.name).join(', ')}</span></div>`;
+        div.onclick = () => addTrackToQueue(track.uri, token);
+        resultsDiv.appendChild(div);
+      });
+    });
+  </script>
+</body>
 </html>
