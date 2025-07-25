@@ -158,18 +158,20 @@ async function autoFillQueue(forcePlay = false) {
 
     if (priorityQueue.length === 0) {  // SI VIDE → RAJOUTE 3 RECO
       const url = `https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_tracks=${lastSeedTrack}`;
+      console.log("Requête recommandations :", url);
       const recRes = await fetch(url, {
         headers: { 'Authorization': 'Bearer ' + access_token }
       });
       const recData = await recRes.json();
+      console.log("Réponse recommandations :", JSON.stringify(recData, null, 2));
 
-      if ((!recData.tracks || recData.tracks.length === 0)) {
-        console.log("Aucune reco trouvée, fallback sur genre pop.");
-        const fallbackRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&market=FR&seed_genres=pop`, {
+      if (!recData.tracks || recData.tracks.length === 0) {
+        console.log("Aucune reco trouvée, fallback sur Top 50 France");
+        const playlistRes = await fetch('https://api.spotify.com/v1/playlists/37i9dQZF1DXcBWIGoYBM5M/tracks?limit=3', {
           headers: { 'Authorization': 'Bearer ' + access_token }
         });
-        const fallbackData = await fallbackRes.json();
-        recData.tracks = fallbackData.tracks || [];
+        const playlistData = await playlistRes.json();
+        recData.tracks = playlistData.items.map(item => item.track);
       }
 
       if (recData.tracks && recData.tracks.length > 0) {
