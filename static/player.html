@@ -15,15 +15,12 @@
     .btn:hover { background: #1ed760; }
     .next { background: #333; }
     .next:hover { background: #444; }
-    .status { margin-top: 30px; font-size: 16px; color: #999; }
-    #startBtn { background: #007bff; margin-top: 40px; }
-    #startBtn:hover { background: #0091ff; }
+    #skipPriority { background: #ff9800; margin-top: 20px; }
     .queue { margin-top: 40px; width: 90%; max-width: 600px; }
     .queue h3 { font-size: 22px; margin-bottom: 10px; text-align: center; }
-    #queueList { list-style: none; padding: 0; }
-    #queueList li { display: flex; align-items: center; gap: 15px; padding: 10px; background: #222; border-radius: 8px; margin-bottom: 8px; }
-    #queueList img { width: 50px; height: 50px; border-radius: 5px; }
-    #queueList span { font-size: 16px; }
+    #priorityQueueList, #queueList { list-style: none; padding: 0; }
+    li { display: flex; align-items: center; gap: 15px; padding: 10px; background: #222; border-radius: 8px; margin-bottom: 8px; }
+    li img { width: 50px; height: 50px; border-radius: 5px; }
   </style>
 </head>
 <body>
@@ -36,80 +33,74 @@
     <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
     <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
   </div>
+  <button class="btn" id="skipPriority">⏩ Passer au prochain invité</button>
   <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
-  <div class="status" id="status">En attente de démarrage...</div>
 
   <div class="queue">
-    <h3>À venir :</h3>
+    <h3>Morceaux invités à venir :</h3>
+    <ul id="priorityQueueList"></ul>
+    <h3>File Spotify :</h3>
     <ul id="queueList"></ul>
   </div>
 
   <script>
-    // Vérifie le token sinon redirige vers /login
-    fetch('/token').then(res => res.json()).then(data => {
-      if (data.error) {
-        window.location.href = '/login';
-      }
-    });
-
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
-      if (data.error) {
-        document.getElementById("status").textContent = "Erreur d'authentification. Redirection...";
-        window.location.href = '/login';
-        throw new Error("Non authentifié");
-      }
+      if (data.error) { window.location.href = '/login'; throw new Error("Non authentifié"); }
       return data.access_token;
     }
 
-    // Récupère et affiche la file d'attente
-    async function updateQueue(token) {
-      const res = await fetch("https://api.spotify.com/v1/me/player/queue", {
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
+    async function updatePriorityQueue() {
+      const res = await fetch('/priority-queue');
       const data = await res.json();
-      const queueList = document.getElementById("queueList");
-      queueList.innerHTML = "";
-      if (!data.queue) return;
+      const list = document.getElementById("priorityQueueList");
+      list.innerHTML = "";
+      data.queue.forEach(uri => {
+        const li = document.createElement("li");
+        li.textContent = uri;
+        list.appendChild(li);
+      });
+    }
 
+    async function updateSpotifyQueue(token) {
+      const res = await fetch("https://api.spotify.com/v1/me/player/queue", { headers: { 'Authorization': 'Bearer ' + token } });
+      const data = await res.json();
+      const list = document.getElementById("queueList");
+      list.innerHTML = "";
+      if (!data.queue) return;
       data.queue.forEach(track => {
         const li = document.createElement("li");
         const img = document.createElement("img");
         img.src = track.album.images[0]?.url || '';
         const span = document.createElement("span");
         span.textContent = `${track.name} – ${track.artists.map(a => a.name).join(', ')}`;
-        li.appendChild(img);
-        li.appendChild(span);
-        queueList.appendChild(li);
+        li.appendChild(img); li.appendChild(span);
+        list.appendChild(li);
       });
     }
+
+    document.getElementById("skipPriority").addEventListener("click", async () => {
+      await fetch('/play-priority', { method: "POST" });
+      updatePriorityQueue();
+    });
 
     let player;
     window.onSpotifyWebPlaybackSDKReady = () => {
       document.getElementById("startBtn").addEventListener("click", async () => {
         const token = await getToken();
-
-        player = new Spotify.Player({
-          name: 'DJ Player',
-          getOAuthToken: cb => { cb(token); },
-          volume: 1.0
-        });
+        player = new Spotify.Player({ name: 'DJ Player', getOAuthToken: cb => { cb(token); }, volume: 1.0 });
 
         player.addListener('ready', ({ device_id }) => {
-          document.getElementById("status").textContent = "Lecteur prêt. Device ID: " + device_id;
           fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
             method: "PUT",
             headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", // Playlist test
-              offset: { position: 0 },
-              position_ms: 0
-            })
+            body: JSON.stringify({ context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" })
           });
           document.getElementById("playPauseBtn").disabled = false;
           document.getElementById("nextBtn").disabled = false;
-          updateQueue(token);
+          updatePriorityQueue();
+          updateSpotifyQueue(token);
         });
 
         player.addListener('player_state_changed', state => {
@@ -118,19 +109,13 @@
           document.getElementById("albumArt").src = track.album.images[0].url;
           document.getElementById("trackName").textContent = track.name;
           document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
-          document.getElementById("status").textContent = "Lecture en cours";
-          updateQueue(token);
+          updatePriorityQueue();
+          updateSpotifyQueue(token);
         });
-
-        player.addListener('initialization_error', ({ message }) => console.error(message));
-        player.addListener('authentication_error', ({ message }) => console.error("Erreur d'auth Spotify:", message));
-        player.addListener('account_error', ({ message }) => console.error(message));
-        player.addListener('playback_error', ({ message }) => console.error(message));
 
         player.connect();
         document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
         document.getElementById("nextBtn").onclick = () => player.nextTrack();
-
         document.getElementById("startBtn").style.display = "none";
       });
     };
