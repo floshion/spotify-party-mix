@@ -14,8 +14,9 @@ const redirect_uri = process.env.REDIRECT_URI;
 
 let access_token = null;
 let refresh_token = null;
-let priorityQueue = []; // [{ uri, name, artists, image, auto }]
-let lastSeedTrack = null; // seed pour recommandations
+let priorityQueue = []; 
+let lastSeedTrack = null; 
+let lastSeedInfo = { title: "Inconnu", artist: "" };
 
 // --- Auth Spotify ---
 app.get('/login', (req, res) => {
@@ -43,6 +44,7 @@ app.get('/callback', async (req, res) => {
   refresh_token = data.refresh_token;
 
   if (!access_token) return res.status(500).send("Impossible d'obtenir un token Spotify.");
+
   await initSeedTrack();
   res.redirect('/player.html');
 });
@@ -68,7 +70,7 @@ app.get('/token', async (req, res) => {
   res.json({ access_token });
 });
 
-// --- Init seed sur morceau actuel ---
+// --- Récupère le morceau en cours comme seed ---
 async function initSeedTrack() {
   try {
     const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
@@ -78,7 +80,8 @@ async function initSeedTrack() {
       const data = await res.json();
       if (data && data.item) {
         lastSeedTrack = data.item.id;
-        console.log("Seed initial défini :", lastSeedTrack);
+        lastSeedInfo = { title: data.item.name, artist: data.item.artists.map(a => a.name).join(', ') };
+        console.log("Seed mis à jour :", lastSeedInfo.title);
       }
     }
   } catch (e) {
@@ -108,6 +111,7 @@ app.post('/add-priority-track', async (req, res) => {
   };
   priorityQueue.push(trackInfo);
   lastSeedTrack = track.id;
+  lastSeedInfo = { title: track.name, artist: track.artists.map(a => a.name).join(', ') };
   res.json({ message: "Track added to priority queue", track: trackInfo });
 });
 
@@ -116,6 +120,7 @@ app.post('/play-priority', async (req, res) => {
   if (priorityQueue.length === 0) return res.status(400).json({ error: "Priority queue is empty" });
   const track = priorityQueue.shift();
   lastSeedTrack = track.uri.split(":").pop();
+  lastSeedInfo = { title: track.name, artist: track.artists };
   await fetch('https://api.spotify.com/v1/me/player/play', {
     method: 'PUT',
     headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -127,6 +132,11 @@ app.post('/play-priority', async (req, res) => {
 // --- Voir la file ---
 app.get('/priority-queue', (req, res) => {
   res.json({ queue: priorityQueue });
+});
+
+// --- DEBUG : renvoie le seed actuel ---
+app.get('/debug-seed', (req, res) => {
+  res.json({ seed: lastSeedTrack, title: lastSeedInfo.title, artist: lastSeedInfo.artist });
 });
 
 // --- Forcer DJ Auto ---
@@ -182,6 +192,7 @@ async function autoFillQueue(forcePlay = false) {
       if (!playingData.is_playing || forcePlay) {
         const firstTrack = priorityQueue.shift();
         lastSeedTrack = firstTrack.uri.split(":").pop();
+        lastSeedInfo = { title: firstTrack.name, artist: firstTrack.artists };
         await fetch('https://api.spotify.com/v1/me/player/play', {
           method: 'PUT',
           headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
