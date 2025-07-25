@@ -19,7 +19,8 @@ const SOURCE_PLAYLIST      = '1g39kHQqy4XHxGGftDiUWb';
 const TARGET_QUEUE_LENGTH  = 6;
 
 let priorityQueue = [];     
-let playedTracks  = new Set(); // <-- mémorise les morceaux déjà joués
+let playedTracks  = new Set(); 
+let lastPlaylistTotal = 0; // <-- mémorise le total connu pour détecter des ajouts
 
 /* ------------------------------------------------------------------
    Auth helpers
@@ -66,9 +67,17 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
   if (!metaRes.ok) return [];
   const total = (await metaRes.json()).tracks.total;
 
+  // Détection de nouveaux morceaux
+  if (total > lastPlaylistTotal) {
+    console.log("🎉 Nouveaux morceaux détectés dans la playlist !");
+    playedTracks = new Set(); // reset, on repart à zéro pour inclure les nouveaux
+  }
+  lastPlaylistTotal = total;
+
+  // Si tout est joué (et aucun nouveau titre), on arrête
   if (playedTracks.size >= total) {
-    console.log("⚠️ Tous les morceaux de la playlist ont été joués.");
-    return []; // plus rien de dispo
+    console.log("⚠️ Tous les morceaux disponibles ont été joués.");
+    return [];
   }
 
   const taken   = new Set();
@@ -84,7 +93,7 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
     const item = (await itemRes.json()).items?.[0];
     if (!item?.track) continue;
 
-    // <-- On ignore les titres déjà joués
+    // On ignore les titres déjà joués
     if (playedTracks.has(item.track.uri)) continue;
 
     results.push({
@@ -103,7 +112,7 @@ async function fetchRandomTracksFromPlaylist (playlistId, limit = 3) {
    ----------------------------------------------------------------*/
 async function autoFillQueue (forcePlay = false) {
   await refreshAccessToken();
-  purgeQueue(); // <-- nettoyage avant remplissage
+  purgeQueue();
 
   const missing = TARGET_QUEUE_LENGTH - priorityQueue.length;
   if (missing > 0) {
@@ -113,7 +122,7 @@ async function autoFillQueue (forcePlay = false) {
 
   if (forcePlay && priorityQueue.length) {
     const track = priorityQueue.shift();
-    playedTracks.add(track.uri); // <-- on marque le titre comme joué
+    playedTracks.add(track.uri);
     await fetch('https://api.spotify.com/v1/me/player/play', {
       method : 'PUT',
       headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
@@ -221,7 +230,6 @@ app.post('/play-priority', async (_req, res) => {
 });
 
 app.get('/priority-queue', (_req, res) => res.json({ queue: priorityQueue }));
-
 app.get('/played-tracks', (_req, res) => res.json({ played: Array.from(playedTracks) }));
 
 /* ------------------------------------------------------------------
