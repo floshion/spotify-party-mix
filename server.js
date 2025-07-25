@@ -15,8 +15,7 @@ const redirect_uri = process.env.REDIRECT_URI;
 let access_token = null;
 let refresh_token = null;
 let priorityQueue = []; // [{ uri, name, artists, image, auto }]
-
-let lastSeedTrack = null; // dernier morceau ajouté ou joué
+let lastSeedTrack = null; // seed pour recommandations
 
 // --- Auth Spotify ---
 app.get('/login', (req, res) => {
@@ -44,6 +43,9 @@ app.get('/callback', async (req, res) => {
   refresh_token = data.refresh_token;
 
   if (!access_token) return res.status(500).send("Impossible d'obtenir un token Spotify.");
+
+  // Init seed sur le morceau actuel
+  await initSeedTrack();
   res.redirect('/player.html');
 });
 
@@ -67,6 +69,24 @@ app.get('/token', async (req, res) => {
   access_token = data.access_token;
   res.json({ access_token });
 });
+
+// --- Fonction pour init le seed track au démarrage ---
+async function initSeedTrack() {
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { 'Authorization': 'Bearer ' + access_token }
+    });
+    if (res.status === 200) {
+      const data = await res.json();
+      if (data && data.item) {
+        lastSeedTrack = data.item.id;
+        console.log("Seed initial défini :", lastSeedTrack);
+      }
+    }
+  } catch (e) {
+    console.error("Erreur lors de l'init du seed :", e);
+  }
+}
 
 // --- Ajout musique prioritaire ---
 app.post('/add-priority-track', async (req, res) => {
@@ -113,7 +133,11 @@ app.get('/priority-queue', (req, res) => {
 
 // --- Auto-fill queue ---
 async function autoFillQueue() {
-  if (!lastSeedTrack) return;
+  if (!lastSeedTrack) {
+    await initSeedTrack();
+    if (!lastSeedTrack) return;
+  }
+
   if (priorityQueue.length > 0) return;
 
   const recRes = await fetch(`https://api.spotify.com/v1/recommendations?limit=3&seed_tracks=${lastSeedTrack}`, {
@@ -121,17 +145,37 @@ async function autoFillQueue() {
   });
   const recData = await recRes.json();
 
+  if (recData.error) {
+    console.error("Erreur Spotify recommendations :", recData.error);
+    return;
+  }
+
   if (recData.tracks && recData.tracks.length > 0) {
-    recData.tracks.forEach(track => {
-      priorityQueue.push({
-        uri: track.uri,
-        name: track.name,
-        artists: track.artists.map(a => a.name).join(', '),
-        image: track.album.images[0]?.url || '',
-        auto: true
-      });
-    });
+    const newTracks = recData.tracks.map(track => ({
+      uri: track.uri,
+      name: track.name,
+      artists: track.artists.map(a => a.name).join(', '),
+      image: track.album.images[0]?.url || '',
+      auto: true
+    }));
+    priorityQueue.push(...newTracks);
     console.log("Auto-fill : ajout de recommandations");
+
+    // Si rien ne joue actuellement → on lance direct le 1er auto-track
+    const playingRes = await fetch('https://api.spotify.com/v1/me/player', {
+      headers: { 'Authorization': 'Bearer ' + access_token }
+    });
+    const playingData = await playingRes.json();
+    if (!playingData.is_playing) {
+      const firstTrack = priorityQueue.shift();
+      lastSeedTrack = firstTrack.uri.split(":").pop();
+      await fetch('https://api.spotify.com/v1/me/player/play', {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uris: [firstTrack.uri] })
+      });
+      console.log("Lecture auto démarrée :", firstTrack.name);
+    }
   }
 }
 
