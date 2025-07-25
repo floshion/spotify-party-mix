@@ -2,34 +2,49 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Spotify Party Mix</title>
+  <title>DJ Player - Spotify Party Mix</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="favicon_flo.png">
+  <style>
+    body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    .main-container { display: flex; justify-content: space-between; width: 95%; max-width: 1200px; margin-top: 30px; }
+    .qr-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    #qrcode { margin-bottom: 10px; }
+    .qr-container .logo { display: block; margin-top: 20px; width: 150px; height: 150px; border-radius: 50%; object-fit: cover; background: #111; }
+    .track-container { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .track-container img { width: 320px; height: 320px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.8); }
+    .track-container h2 { font-size: 28px; margin: 15px 0 5px; }
+    .track-container p { font-size: 20px; color: #ccc; margin: 0; }
+    .controls { display: flex; gap: 20px; margin-top: 20px; }
+    .btn { background: #1DB954; border: none; padding: 15px 25px; border-radius: 50px; font-size: 18px; cursor: pointer; transition: 0.3s; }
+    .btn:hover { background: #1ed760; }
+    .next { background: #ff9800; }
+    .next:hover { background: #ffb84d; }
+    .queue-container { flex: 1; background: #222; padding: 15px; border-radius: 10px; overflow-y: auto; max-height: 500px; }
+    .queue-container h3 { text-align: center; margin-bottom: 10px; }
+    #priorityQueueList { list-style: none; padding: 0; }
+    #priorityQueueList li { display: flex; align-items: center; gap: 10px; background: #333; padding: 8px; border-radius: 5px; margin-bottom: 8px; }
+    #priorityQueueList img { width: 50px; height: 50px; border-radius: 5px; }
+    #errorMsg { color: #ff4444; font-size: 16px; margin-top: 10px; }
+    .progress-container { width: 100%; max-width: 320px; height: 8px; background: #333; border-radius: 4px; margin-top: 15px; }
+    .progress-bar { height: 100%; background: #1DB954; width: 0%; border-radius: 4px; }
+    .time-info { display: flex; justify-content: space-between; width: 100%; max-width: 320px; font-size: 14px; color: #aaa; margin-top: 5px; }
+  </style>
 </head>
 <body>
-  <div id="app">
-    <div class="left-panel">
-      <div class="qr-section">
-        <h3>Invitez vos amis</h3>
-        <p>Scannez pour ajouter vos morceaux</p>
-        <img src="qr_code.png" alt="QR Code">
-      </div>
-      <div class="logo-section">
-        <img src="logo_flo_besset.png" alt="Logo Flo Besset">
-      </div>
+  <div class="main-container">
+    <!-- QR code + Logo -->
+    <div class="qr-container">
+      <h3>Invitez vos amis</h3>
+      <div id="qrcode"></div>
+      <p style="color:#aaa; font-size:14px;">Scannez pour ajouter vos morceaux</p>
+      <img src="logo_flo_besset.png" alt="Flo BESSET" class="logo">
     </div>
 
-    <div class="center-panel">
-      <!-- Nouveau bloc pour le menu playlist -->
-      <div class="playlist-selector">
-        <label for="playlistSelect">Choisir une playlist :</label>
-        <select id="playlistSelect"></select>
-        <button id="startPlaylistBtn" class="btn">Lancer</button>
-      </div>
-      <!-- Fin du nouveau bloc -->
-
+    <!-- Player -->
+    <div class="track-container">
       <img id="albumArt" src="" alt="Album cover">
-      <h2 id="trackName">Cliquez sur "Démarrer"…</h2>
+      <h2 id="trackName">Cliquez sur 'Démarrer'…</h2>
       <p id="artistName"></p>
       <div class="progress-container">
         <div class="progress-bar" id="progressBar"></div>
@@ -39,32 +54,36 @@
         <span id="totalTime">0:00</span>
       </div>
       <div class="controls">
-        <button id="playPauseBtn" class="btn">⏯ Play/Pause</button>
-        <button id="nextBtn" class="btn">⏭ Suivant</button>
-        <button id="startBtn" class="btn">▶️ Démarrer le lecteur</button>
+        <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
+        <button class="btn next" id="nextBtn" disabled>⏭ Suivant</button>
       </div>
+      <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
+      <p id="errorMsg"></p>
     </div>
 
-    <div class="right-panel">
-      <h3>Morceaux invités à venir :</h3>
+    <!-- File invités -->
+    <div class="queue-container">
+      <h3>Morceaux à venir :</h3>
       <ul id="priorityQueueList"></ul>
     </div>
   </div>
 
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
+    // Génération du QR Code
+    const guestUrl = window.location.origin + "/guest.html";
+    new QRCode(document.getElementById("qrcode"), { text: guestUrl, width: 200, height: 200, colorDark : "#ffffff", colorLight : "#111111", correctLevel : QRCode.CorrectLevel.H });
+
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
+      if (!data.access_token) {
+        document.getElementById("errorMsg").textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
+        throw new Error("Token invalide");
+      }
       return data.access_token;
-    }
-
-    async function fetchPlaylists(token) {
-      const res = await fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
-      const data = await res.json();
-      return data.items;
     }
 
     async function updatePriorityQueue() {
@@ -74,82 +93,73 @@
       list.innerHTML = "";
       data.queue.forEach(track => {
         const li = document.createElement("li");
-        li.innerHTML = `<img src="${track.image}" alt="cover"><span>${track.name} – ${track.artists}</span>`;
+        const img = document.createElement("img");
+        img.src = track.image;
+        const span = document.createElement("span");
+        span.textContent = `${track.name} – ${track.artists}` + (track.auto ? " (Auto)" : "");
+        li.appendChild(img); li.appendChild(span);
         list.appendChild(li);
       });
     }
+    setInterval(updatePriorityQueue, 5000);
+
+    let player;
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      document.getElementById("startBtn").addEventListener("click", async () => {
+        try {
+          const token = await getToken();
+          player = new Spotify.Player({ name: 'DJ Player', getOAuthToken: cb => { cb(token); }, volume: 1.0 });
+
+          player.addListener('ready', ({ device_id }) => {
+            fetch("https://api.spotify.com/v1/me/player/play?device_id=" + device_id, {
+              method: "PUT",
+              headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ context_uri: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" })
+            });
+            document.getElementById("playPauseBtn").disabled = false;
+            document.getElementById("nextBtn").disabled = false;
+            updatePriorityQueue();
+          });
+          setInterval(async () => {
+  const state = await player.getCurrentState();
+  if (state && !state.paused) {
+    const position = state.position;
+    const duration = state.duration;
+    document.getElementById("progressBar").style.width = ((position / duration) * 100) + "%";
+    document.getElementById("currentTime").textContent = formatTime(position);
+    document.getElementById("totalTime").textContent = formatTime(duration);
+  }
+}, 1000);
+
+          player.addListener('player_state_changed', state => {
+            if (!state) return;
+            const track = state.track_window.current_track;
+            document.getElementById("albumArt").src = track.album.images[0].url;
+            document.getElementById("trackName").textContent = track.name;
+            document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
+
+            const position = state.position;
+            const duration = state.duration;
+            document.getElementById("progressBar").style.width = ((position / duration) * 100) + "%";
+            document.getElementById("currentTime").textContent = formatTime(position);
+            document.getElementById("totalTime").textContent = formatTime(duration);
+
+            updatePriorityQueue();
+          });
+
+          player.connect();
+          document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
+          document.getElementById("nextBtn").onclick = async () => { await fetch('/play-priority', { method: "POST" }); updatePriorityQueue(); };
+          document.getElementById("startBtn").style.display = "none";
+        } catch (e) { console.error(e); }
+      });
+    };
 
     function formatTime(ms) {
       const minutes = Math.floor(ms / 60000);
       const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
       return `${minutes}:${seconds}`;
     }
-
-    let player, deviceId = null, selectedPlaylist = null;
-
-    window.onSpotifyWebPlaybackSDKReady = async () => {
-      const token = await getToken();
-
-      // Charger les playlists
-      const playlists = await fetchPlaylists(token);
-      const select = document.getElementById("playlistSelect");
-      playlists.forEach(p => {
-        const opt = document.createElement("option");
-        opt.value = p.uri;
-        opt.textContent = p.name;
-        select.appendChild(opt);
-      });
-      selectedPlaylist = playlists[0]?.uri;
-
-      select.addEventListener("change", e => selectedPlaylist = e.target.value);
-
-      player = new Spotify.Player({
-        name: 'Spotify Party Mix',
-        getOAuthToken: cb => cb(token),
-        volume: 1.0
-      });
-
-      player.addListener('ready', ({ device_id }) => { deviceId = device_id; });
-
-      player.addListener('player_state_changed', state => {
-        if (!state) return;
-        const track = state.track_window.current_track;
-        document.getElementById("albumArt").src = track.album.images[0].url;
-        document.getElementById("trackName").textContent = track.name;
-        document.getElementById("artistName").textContent = track.artists.map(a => a.name).join(', ');
-        document.getElementById("progressBar").style.width = ((state.position / state.duration) * 100) + "%";
-        document.getElementById("currentTime").textContent = formatTime(state.position);
-        document.getElementById("totalTime").textContent = formatTime(state.duration);
-      });
-
-      document.getElementById("playPauseBtn").onclick = () => player.togglePlay();
-      document.getElementById("nextBtn").onclick = async () => { await fetch('/play-priority', { method: "POST" }); updatePriorityQueue(); };
-
-      document.getElementById("startBtn").onclick = async () => {
-        await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-          method: "PUT",
-          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context_uri: selectedPlaylist })
-        });
-      };
-
-      document.getElementById("startPlaylistBtn").onclick = async () => {
-        await fetch('/set-playlist', { 
-          method: "POST", 
-          headers: { "Content-Type": "application/json" }, 
-          body: JSON.stringify({ uri: selectedPlaylist }) 
-        });
-        await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-          method: "PUT",
-          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context_uri: selectedPlaylist })
-        });
-      };
-
-      player.connect();
-      updatePriorityQueue();
-      setInterval(updatePriorityQueue, 5000);
-    };
   </script>
 </body>
 </html>
