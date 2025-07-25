@@ -18,12 +18,15 @@ let refresh_token = null;
 // Redirige vers Spotify pour login
 app.get('/login', (req, res) => {
   const scope = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
-  res.redirect(`https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=code&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scope)}`);
+  const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=code&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scope)}`;
+  console.log("Redirection vers Spotify :", authUrl);
+  res.redirect(authUrl);
 });
 
 // Callback Spotify → échange le code contre token
 app.get('/callback', async (req, res) => {
   const code = req.query.code || null;
+  console.log("Code reçu de Spotify :", code);
 
   const response = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
@@ -38,15 +41,24 @@ app.get('/callback', async (req, res) => {
   });
 
   const data = await response.json();
+  console.log("Réponse échange code/token :", data);
+
   access_token = data.access_token;
   refresh_token = data.refresh_token;
+
+  if (!access_token) {
+    return res.status(500).send("Impossible d'obtenir un token Spotify.");
+  }
 
   res.redirect('/static/player.html');
 });
 
-// Route pour fournir un token valide
+// Fournit un access_token actualisé
 app.get('/token', async (req, res) => {
-  if (!refresh_token) return res.status(401).json({ error: 'Not authenticated' });
+  if (!refresh_token) {
+    console.log("Pas de refresh_token enregistré.");
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
 
   const response = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
@@ -60,6 +72,11 @@ app.get('/token', async (req, res) => {
   });
 
   const data = await response.json();
+  console.log("Réponse Spotify refresh_token :", data);
+  if (data.error) {
+    return res.status(500).json({ error: 'Spotify token refresh failed', details: data });
+  }
+
   access_token = data.access_token;
   res.json({ access_token });
 });
