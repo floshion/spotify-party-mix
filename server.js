@@ -256,6 +256,7 @@ const __dirname  = path.dirname(__filename);
 app.use(express.static(path.join(__dirname, 'static')));
 app.get('/',    (_req, res) => res.redirect('/player.html'));
 app.get('/guest',(_req, res) => res.redirect('/guest.html'));
+app.get('/display', (_req, res) => res.redirect('/display.html'));
 
 app.listen(PORT, () => console.log(`🚀 Server ready on port ${PORT}`));
 setInterval(() => autoFillQueue(false), 20 * 1000);
