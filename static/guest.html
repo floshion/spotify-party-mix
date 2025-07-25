@@ -5,19 +5,51 @@
   <title>Ajouter un morceau</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { background: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-    h1 { text-align: center; margin-bottom: 20px; }
-    input { width: 100%; padding: 12px; font-size: 18px; border: none; border-radius: 8px; margin-bottom: 20px; }
-    .result { display: flex; align-items: center; background: #222; padding: 10px; border-radius: 8px; margin-bottom: 10px; cursor: pointer; }
-    .result img { width: 50px; height: 50px; border-radius: 5px; margin-right: 15px; }
+    body { background: #0d0d0d; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; }
+    header { display: flex; align-items: center; justify-content: center; padding: 15px; background: #1c1c1e; border-bottom: 1px solid #333; }
+    header img { position: absolute; left: 15px; width: 40px; height: 40px; border-radius: 50%; }
+    header h1 { font-size: 20px; margin: 0; color: #fff; }
+    .now-playing { text-align: center; padding: 20px; }
+    .now-playing img { width: 200px; height: 200px; border-radius: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.7); }
+    .now-playing h2 { font-size: 22px; margin: 15px 0 5px; }
+    .now-playing p { font-size: 16px; color: #aaa; margin: 0; }
+    .queue { padding: 15px; }
+    .queue h3 { font-size: 18px; margin-bottom: 10px; }
+    .queue-item { display: flex; align-items: center; padding: 8px; background: #1c1c1e; border-radius: 10px; margin-bottom: 8px; }
+    .queue-item img { width: 50px; height: 50px; border-radius: 8px; margin-right: 10px; }
+    .queue-item div { flex: 1; }
+    .queue-item strong { font-size: 16px; display: block; }
+    .queue-item span { font-size: 14px; color: #aaa; }
+    .search-bar { padding: 15px; }
+    .search-bar input { width: 100%; padding: 12px 15px; font-size: 16px; border-radius: 25px; border: none; outline: none; background: #2c2c2e; color: #fff; }
+    .result { display: flex; align-items: center; background: #1c1c1e; padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
+    .result:hover { background: #2c2c2e; }
+    .result img { width: 50px; height: 50px; border-radius: 8px; margin-right: 12px; }
     .result div { flex: 1; }
-    .result strong { display: block; font-size: 16px; }
+    .result strong { font-size: 16px; display: block; }
     .result span { font-size: 14px; color: #aaa; }
   </style>
 </head>
 <body>
-  <h1>Ajouter un morceau</h1>
-  <input type="text" id="searchInput" placeholder="Rechercher un titre..." />
+  <header>
+    <img src="logo_flo_besset.png" alt="Logo">
+    <h1>Ajouter un morceau</h1>
+  </header>
+
+  <div class="now-playing">
+    <img id="currentArt" src="" alt="Album">
+    <h2 id="currentTitle">Aucun morceau en cours</h2>
+    <p id="currentArtist"></p>
+  </div>
+
+  <div class="queue">
+    <h3>À venir</h3>
+    <div id="queueList"></div>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Rechercher un titre..." />
+  </div>
   <div id="results"></div>
 
   <script>
@@ -26,6 +58,41 @@
       const data = await res.json();
       if (data.error) { window.location.href = '/login'; throw new Error("Non authentifié"); }
       return data.access_token;
+    }
+
+    async function fetchCurrentTrack(token) {
+      const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (res.status !== 200) return null;
+      return await res.json();
+    }
+
+    async function fetchQueue() {
+      const res = await fetch('/priority-queue');
+      return (await res.json()).queue;
+    }
+
+    async function updateNowPlaying() {
+      const token = await getToken();
+      const data = await fetchCurrentTrack(token);
+      if (data && data.item) {
+        document.getElementById('currentArt').src = data.item.album.images[0]?.url || '';
+        document.getElementById('currentTitle').textContent = data.item.name;
+        document.getElementById('currentArtist').textContent = data.item.artists.map(a => a.name).join(', ');
+      }
+    }
+
+    async function updateQueue() {
+      const queue = await fetchQueue();
+      const container = document.getElementById('queueList');
+      container.innerHTML = '';
+      queue.forEach(track => {
+        const div = document.createElement('div');
+        div.className = 'queue-item';
+        div.innerHTML = `<img src=\"${track.image}\" /><div><strong>${track.name}</strong><span>${track.artists}</span></div>`;
+        container.appendChild(div);
+      });
     }
 
     async function searchTracks(query, token) {
@@ -38,7 +105,8 @@
 
     async function addTrackToPriority(uri) {
       await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
-      alert("Morceau ajouté, il sera joué après le morceau actuel !");
+      alert("Morceau ajouté !");
+      updateQueue();
     }
 
     document.getElementById("searchInput").addEventListener("input", async (e) => {
@@ -56,6 +124,12 @@
         resultsDiv.appendChild(div);
       });
     });
+
+    // Actualiser en boucle
+    setInterval(updateNowPlaying, 5000);
+    setInterval(updateQueue, 5000);
+    updateNowPlaying();
+    updateQueue();
   </script>
 </body>
 </html>
