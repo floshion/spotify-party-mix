@@ -20,10 +20,10 @@ const TARGET_QUEUE_LENGTH = 6;
 
 const GETSONGBPM_KEY = "cca3a69eea0a43b88586829baaa0409e";
 
-let priorityQueue = [];                  // [{ uri,name,artists,image,auto }]
+let priorityQueue = [];                  
 let playedTracks  = new Set();
 
-/* ---------- Auth Spotify -------------------------------------------------------- */
+/* ---------- Auth Spotify ---------- */
 async function refreshAccessToken () {
   if (!refresh_token) return;
   const r = await fetch('https://accounts.spotify.com/api/token', {
@@ -40,7 +40,7 @@ async function refreshAccessToken () {
 await refreshAccessToken();
 setInterval(refreshAccessToken, 50*60*1000);
 
-/* ---------- Utils ---------------------------------------------------------------- */
+/* ---------- Utils ---------- */
 function purgeQueue(){ priorityQueue = priorityQueue.filter(t=>!playedTracks.has(t.uri)); }
 function deduplicateQueue(){
   const seen=new Set();
@@ -84,13 +84,19 @@ async function autoFillQueue(){
   }
 }
 
-/* ---------- GetSongBPM API ------------------------------------------------------- */
+/* ---------- GetSongBPM API ---------- */
 async function getTrackFeaturesFromGSBPM(title){
   try {
-    const url = `https://api.getsongbpm.com/search/?api_key=${GETSONGBPM_KEY}&type=track&lookup=${encodeURIComponent(title)}`;
+    const url = `https://api.getsongbpm.com/song/?api_key=${GETSONGBPM_KEY}&name=${encodeURIComponent(title)}`;
     const r = await fetch(url);
+    const contentType = r.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      console.error("GSBPM non JSON. Status:", r.status, "URL:", url);
+      console.error("Response text:", await r.text());
+      return null;
+    }
     const data = await r.json();
-    if(data && data.search && data.search.length > 0){
+    if (data && data.search && data.search.length > 0){
       return {
         bpm: parseFloat(data.search[0].tempo) || 0,
         key: data.search[0].key || '',
@@ -107,7 +113,7 @@ function scoreSimilarity(a, b){
   return bpmDiff*2 + keyDiff;
 }
 
-/* ---------- Routes principales --------------------------------------------------- */
+/* ---------- Routes ---------- */
 app.get('/token', (_q,res)=>res.json({access_token}));
 
 app.post('/add-priority-track', async (req,res)=>{
@@ -122,7 +128,6 @@ app.post('/add-priority-track', async (req,res)=>{
   const tInfo={ uri, name:track.name, artists:track.artists.map(a=>a.name).join(', '),
                 image:track.album.images?.[0]?.url||'', auto:false };
 
-  // -- on retire les autos, on met le titre en tête
   priorityQueue = priorityQueue.filter(t=>!t.auto);
   priorityQueue.unshift(tInfo);
 
@@ -143,24 +148,21 @@ app.get('/next-track', async (_q,res)=>{
   res.json({track:next});
 });
 
-/* ---------- Suggestions harmonisées --------------------------------------------- */
+/* ---------- Suggestions harmonisées ---------- */
 app.get('/suggest', async (req,res)=>{
   const query = req.query.q;
   if(!query) return res.status(400).json({error:'No query'});
   try {
-    // 1. Récupérer morceau en cours
     const current = await fetch('https://api.spotify.com/v1/me/player/currently-playing',
       {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
     const currentTitle = current?.item?.name + ' ' + current?.item?.artists?.map(a=>a.name).join(' ');
     if(!currentTitle) return res.status(400).json({error:'No current track'});
     const currentFeat = await getTrackFeaturesFromGSBPM(currentTitle);
 
-    // 2. Rechercher les candidats sur Spotify
     const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10&market=FR`,
       {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
     const candidates = searchRes.tracks?.items || [];
 
-    // 3. Calculer similarité
     const scored = [];
     for(const tr of candidates){
       const feat = await getTrackFeaturesFromGSBPM(tr.name + ' ' + tr.artists.map(a=>a.name).join(' '));
@@ -183,7 +185,7 @@ app.get('/suggest', async (req,res)=>{
   }
 });
 
-/* ---------- Télécommande --------------------------------------------------------- */
+/* ---------- Télécommande ---------- */
 app.post('/toggle-play', async (_req, res) => {
   const st = await fetch('https://api.spotify.com/v1/me/player',
                          { headers:{Authorization:'Bearer '+access_token} })
@@ -217,7 +219,7 @@ app.post('/skip', async (_req, res) => {
   res.json(next);
 });
 
-/* ---------- Static / boot -------------------------------------------------------- */
+/* ---------- Static / boot ---------- */
 const __filename=fileURLToPath(import.meta.url);
 const __dirname =path.dirname(__filename);
 app.use(express.static(path.join(__dirname,'static')));
