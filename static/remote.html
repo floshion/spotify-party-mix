@@ -27,7 +27,20 @@
     .item strong{display:block;font-size:15px}
     .item span{font-size:13px;color:#aaa}
     #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:rgba(40,40,40,.95);
-           color:#fff;padding:10px 18px;border-radius:25px;font-size:14px;opacity:0;transition:opacity .3s}
+           color:#fff;padding:10px 18px;border-radius:25px;font-size:14px;opacity:0;transition:opacity .3s;z-index:3000}
+
+    /* modal recherche */
+    .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(13,13,13,.95);display:none;flex-direction:column;z-index:2000}
+    .modal.show{display:flex}
+    .modal-header{padding:10px}
+    .modal-header input{width:100%;padding:12px 15px;font-size:16px;border-radius:25px;border:none;outline:none;background:#2c2c2e;color:#fff}
+    .modal-results{flex:1;overflow-y:auto;padding:10px}
+    .result{display:flex;align-items:center;background:#1c1c1e;padding:12px;border-radius:10px;margin-bottom:8px;cursor:pointer}
+    .result:hover{background:#2c2c2e}
+    .result img{width:50px;height:50px;border-radius:8px;margin-right:12px}
+    .result strong{display:block;font-size:16px}
+    .result span{font-size:14px;color:#aaa}
+    .close{position:absolute;right:15px;top:15px;font-size:24px;background:none;border:none;color:#fff}
   </style>
 </head>
 <body>
@@ -50,47 +63,66 @@
 <div class="queue"><h3>À venir</h3><div id="list"></div></div>
 <div id="toast"></div>
 
-<script>
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.opacity=1;
-setTimeout(()=>t.style.opacity=0,2000);}
+<!-- Modal recherche -->
+<div class="modal" id="searchM">
+  <button class="close" id="closeM">&times;</button>
+  <div class="modal-header"><input type="text" id="searchI" placeholder="Rechercher un titre…"></div>
+  <div class="modal-results" id="results"></div>
+</div>
 
-async function getToken(){
-  const d=await (await fetch('/token')).json();return d.access_token;
-}
+<script>
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,2000);}
+async function getToken(){return (await (await fetch('/token')).json()).access_token;}
+
 async function now(){
   const tok=await getToken();
-  const r=await fetch('https://api.spotify.com/v1/me/player/currently-playing',
-    {headers:{Authorization:'Bearer '+tok}});
+  const r=await fetch('https://api.spotify.com/v1/me/player/currently-playing',{headers:{Authorization:'Bearer '+tok}});
   if(r.status!==200)return;
   const d=await r.json();
   if(!d.item)return;
-  document.getElementById('art').src=d.item.album.images[0]?.url||'';
-  document.getElementById('title').textContent=d.item.name;
-  document.getElementById('artist').textContent=d.item.artists.map(a=>a.name).join(', ');
-  document.getElementById('prog').style.width=(d.progress_ms/d.item.duration_ms)*100+'%';
-  document.getElementById('cur').textContent=time(d.progress_ms);
-  document.getElementById('dur').textContent=time(d.item.duration_ms);
+  art.src=d.item.album.images[0]?.url||'';
+  title.textContent=d.item.name;
+  artist.textContent=d.item.artists.map(a=>a.name).join(', ');
+  prog.style.width=(d.progress_ms/d.item.duration_ms)*100+'%';
+  cur.textContent=time(d.progress_ms);
+  dur.textContent=time(d.item.duration_ms);
 }
 async function queue(){
   const q=await (await fetch('/priority-queue')).json();
-  const c=document.getElementById('list');c.innerHTML='';
+  list.innerHTML='';
   q.queue.forEach(t=>{
-    c.insertAdjacentHTML('beforeend',
-      `<div class="item"><img src="${t.image}"><div><strong>${t.name}</strong><span>${t.artists}</span></div></div>`);
+    list.insertAdjacentHTML('beforeend',`<div class="item"><img src="${t.image}"><div><strong>${t.name}</strong><span>${t.artists}</span></div></div>`);
   });
 }
-
 function time(ms){const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000).toString().padStart(2,'0');return m+':'+s;}
 
-document.getElementById('toggle').onclick=async()=>{
-  await fetch('/toggle-play',{method:'POST'});
+toggle.onclick=async()=>{await fetch('/toggle-play',{method:'POST'});};
+next.onclick  =async()=>{await fetch('/skip',{method:'POST'});toast('⏭️  Titre suivant');queue();};
+
+/* --- recherche / ajout --- */
+open.onclick=()=>{searchM.classList.add('show');searchI.value='';results.innerHTML='';searchI.focus();};
+closeM.onclick=()=>searchM.classList.remove('show');
+
+searchI.oninput=async e=>{
+  const q=e.target.value.trim();
+  if(q.length<2)return results.innerHTML='';
+  const tok=await getToken();
+  const d=await (await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=10`,
+    {headers:{Authorization:'Bearer '+tok}})).json();
+  results.innerHTML='';
+  d.tracks.items.forEach(t=>{
+    results.insertAdjacentHTML('beforeend',
+     `<div class="result" data-uri="${t.uri}"><img src="${t.album.images[0]?.url}"><div><strong>${t.name}</strong><span>${t.artists.map(a=>a.name).join(', ')}</span></div></div>`);
+  });
 };
-document.getElementById('next').onclick=async()=>{
-  await fetch('/skip',{method:'POST'});
-  toast('⏭️  Titre suivant');
+results.onclick=async e=>{
+  const div=e.target.closest('.result');
+  if(!div)return;
+  await fetch('/add-priority-track?uri='+encodeURIComponent(div.dataset.uri),{method:'POST'});
+  toast('Morceau ajouté');
+  searchM.classList.remove('show');
   queue();
 };
-document.getElementById('open').onclick=()=>window.location.href='/guest.html';
 
 setInterval(now,1000);setInterval(queue,5000);now();queue();
 </script>
