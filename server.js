@@ -18,10 +18,12 @@ let   refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
 const SOURCE_PLAYLIST     = '1g39kHQqy4XHxGGftDiUWb';
 const TARGET_QUEUE_LENGTH = 6;
 
+const GETSONGBPM_KEY = "cca3a69eea0a43b88586829baaa0409e";
+
 let priorityQueue = [];                  // [{ uri,name,artists,image,auto }]
 let playedTracks  = new Set();
 
-/* ---------- Auth ---------------------------------------------------------------- */
+/* ---------- Auth Spotify -------------------------------------------------------- */
 async function refreshAccessToken () {
   if (!refresh_token) return;
   const r = await fetch('https://accounts.spotify.com/api/token', {
@@ -82,6 +84,29 @@ async function autoFillQueue(){
   }
 }
 
+/* ---------- GetSongBPM API ------------------------------------------------------- */
+async function getTrackFeaturesFromGSBPM(title){
+  try {
+    const url = `https://api.getsongbpm.com/search/?api_key=${GETSONGBPM_KEY}&type=track&lookup=${encodeURIComponent(title)}`;
+    const r = await fetch(url);
+    const data = await r.json();
+    if(data && data.search && data.search.length > 0){
+      return {
+        bpm: parseFloat(data.search[0].tempo) || 0,
+        key: data.search[0].key || '',
+        id: data.search[0].id
+      };
+    }
+  } catch(e){ console.error("GSBPM Error:", e); }
+  return null;
+}
+
+function scoreSimilarity(a, b){
+  const bpmDiff = Math.abs((a?.bpm||0) - (b?.bpm||0));
+  const keyDiff = (a?.key && b?.key && a.key===b.key) ? 0 : 5;
+  return bpmDiff*2 + keyDiff;
+}
+
 /* ---------- Routes principales --------------------------------------------------- */
 app.get('/token', (_q,res)=>res.json({access_token}));
 
@@ -118,9 +143,47 @@ app.get('/next-track', async (_q,res)=>{
   res.json({track:next});
 });
 
-/* ---------- Télécommande --------------------------------------------------------- */
+/* ---------- Suggestions harmonisées --------------------------------------------- */
+app.get('/suggest', async (req,res)=>{
+  const query = req.query.q;
+  if(!query) return res.status(400).json({error:'No query'});
+  try {
+    // 1. Récupérer morceau en cours
+    const current = await fetch('https://api.spotify.com/v1/me/player/currently-playing',
+      {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
+    const currentTitle = current?.item?.name + ' ' + current?.item?.artists?.map(a=>a.name).join(' ');
+    if(!currentTitle) return res.status(400).json({error:'No current track'});
+    const currentFeat = await getTrackFeaturesFromGSBPM(currentTitle);
 
-/* ⏯ Play / Pause (toggle) */
+    // 2. Rechercher les candidats sur Spotify
+    const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=10&market=FR`,
+      {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
+    const candidates = searchRes.tracks?.items || [];
+
+    // 3. Calculer similarité
+    const scored = [];
+    for(const tr of candidates){
+      const feat = await getTrackFeaturesFromGSBPM(tr.name + ' ' + tr.artists.map(a=>a.name).join(' '));
+      if(!feat) continue;
+      const score = scoreSimilarity(currentFeat, feat);
+      scored.push({
+        uri: tr.uri,
+        name: tr.name,
+        artists: tr.artists.map(a=>a.name).join(', '),
+        image: tr.album.images?.[0]?.url || '',
+        score
+      });
+    }
+
+    const top = scored.sort((a,b)=>a.score - b.score).slice(0,3);
+    res.json({suggestions:top});
+  } catch(e){
+    console.error(e);
+    res.status(500).json({error:'Server error'});
+  }
+});
+
+/* ---------- Télécommande --------------------------------------------------------- */
 app.post('/toggle-play', async (_req, res) => {
   const st = await fetch('https://api.spotify.com/v1/me/player',
                          { headers:{Authorization:'Bearer '+access_token} })
@@ -136,19 +199,15 @@ app.post('/toggle-play', async (_req, res) => {
   res.json({ playing: !st.is_playing });
 });
 
-/* ⏭ Passer au prochain morceau dans l’ordre de la file */
 app.post('/skip', async (_req, res) => {
-  // 1. on récupère le prochain titre
   const next = await fetch('http://localhost:'+PORT+'/next-track').then(r=>r.json());
   if (!next.track) return res.status(400).json({error:'No track'});
 
-  // 2. on trouve le device actif (Web Playback)
   const info = await fetch('https://api.spotify.com/v1/me/player',
     {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
   const deviceId = info?.device?.id;
   if(!deviceId) return res.status(500).json({error:'No active device'});
 
-  // 3. on lance le morceau immédiatement
   await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
     method:'PUT',
     headers:{Authorization:'Bearer '+access_token,'Content-Type':'application/json'},
