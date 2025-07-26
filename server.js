@@ -18,7 +18,7 @@ let   refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
 const SOURCE_PLAYLIST     = '1g39kHQqy4XHxGGftDiUWb';
 const TARGET_QUEUE_LENGTH = 6;
 
-let priorityQueue = [];                  
+let priorityQueue = [];                  // [{ uri,name,artists,image,auto }]
 let playedTracks  = new Set();
 
 /* ---------- Auth ---------------------------------------------------------------- */
@@ -48,46 +48,28 @@ function deduplicateQueue(){
 async function fetchRandomTracksFromPlaylist(id, limit=3){
   if(limit<=0) return [];
   const h={Authorization:'Bearer '+access_token};
-  try {
-    const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${id}?fields=tracks(total)&market=FR`,{headers:h});
-    if (!metaRes.ok) {
-      console.error(`Erreur API Spotify meta: ${metaRes.status} - ${await metaRes.text()}`);
-      return [];
-    }
-    const meta = await metaRes.json();
-    const total = meta.tracks.total;
+  const meta = await (await fetch(`https://api.spotify.com/v1/playlists/${id}?fields=tracks(total)&market=FR`,{headers:h})).json();
+  const total = meta.tracks.total;
 
-    const out=[], taken=new Set();
-    while(out.length<limit && taken.size<total){
-      const offset=Math.floor(Math.random()*total);
-      if(taken.has(offset)) continue;
-      taken.add(offset);
-
-      const trackRes = await fetch(
-        `https://api.spotify.com/v1/playlists/${id}/tracks?limit=1&offset=${offset}&market=FR`,{headers:h}
-      );
-      if (!trackRes.ok) {
-        console.error(`Erreur API Spotify track: ${trackRes.status} - ${await trackRes.text()}`);
-        break;
-      }
-
-      const trackJson = await trackRes.json();
-      const item = trackJson.items?.[0];
-      if(!item?.track) continue;
-      if(playedTracks.has(item.track.uri)) continue;
-      out.push({
-        uri:item.track.uri,
-        name:item.track.name,
-        artists:item.track.artists.map(a=>a.name).join(', '),
-        image:item.track.album.images?.[0]?.url||'',
-        auto:true
-      });
-    }
-    return out;
-  } catch (err) {
-    console.error("Erreur fetchRandomTracksFromPlaylist:", err);
-    return [];
+  const out=[], taken=new Set();
+  while(out.length<limit && taken.size<total){
+    const offset=Math.floor(Math.random()*total);
+    if(taken.has(offset)) continue;
+    taken.add(offset);
+    const item = (await (await fetch(
+      `https://api.spotify.com/v1/playlists/${id}/tracks?limit=1&offset=${offset}&market=FR`,{headers:h})
+    ).json()).items?.[0];
+    if(!item?.track) continue;
+    if(playedTracks.has(item.track.uri)) continue;
+    out.push({
+      uri:item.track.uri,
+      name:item.track.name,
+      artists:item.track.artists.map(a=>a.name).join(', '),
+      image:item.track.album.images?.[0]?.url||'',
+      auto:true
+    });
   }
+  return out;
 }
 
 async function autoFillQueue(){
@@ -109,14 +91,13 @@ app.post('/add-priority-track', async (req,res)=>{
   if(playedTracks.has(uri)) return res.status(400).json({error:'Track already played'});
 
   const id = uri.split(':').pop();
-  const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${id}?market=FR`,
-    {headers:{Authorization:'Bearer '+access_token}});
-  if (!trackRes.ok) return res.status(500).json({error:"Erreur récupération track"});
-  const track = await trackRes.json();
+  const track = await (await fetch(`https://api.spotify.com/v1/tracks/${id}?market=FR`,
+    {headers:{Authorization:'Bearer '+access_token}})).json();
 
   const tInfo={ uri, name:track.name, artists:track.artists.map(a=>a.name).join(', '),
                 image:track.album.images?.[0]?.url||'', auto:false };
 
+  // -- on retire les autos, on met le titre en tête
   priorityQueue = priorityQueue.filter(t=>!t.auto);
   priorityQueue.unshift(tInfo);
 
@@ -138,6 +119,8 @@ app.get('/next-track', async (_q,res)=>{
 });
 
 /* ---------- Télécommande --------------------------------------------------------- */
+
+/* ⏯ Play / Pause (toggle) */
 app.post('/toggle-play', async (_req, res) => {
   const st = await fetch('https://api.spotify.com/v1/me/player',
                          { headers:{Authorization:'Bearer '+access_token} })
@@ -153,15 +136,19 @@ app.post('/toggle-play', async (_req, res) => {
   res.json({ playing: !st.is_playing });
 });
 
+/* ⏭ Passer au prochain morceau dans l’ordre de la file */
 app.post('/skip', async (_req, res) => {
+  // 1. on récupère le prochain titre
   const next = await fetch('http://localhost:'+PORT+'/next-track').then(r=>r.json());
   if (!next.track) return res.status(400).json({error:'No track'});
 
+  // 2. on trouve le device actif (Web Playback)
   const info = await fetch('https://api.spotify.com/v1/me/player',
     {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
   const deviceId = info?.device?.id;
   if(!deviceId) return res.status(500).json({error:'No active device'});
 
+  // 3. on lance le morceau immédiatement
   await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
     method:'PUT',
     headers:{Authorization:'Bearer '+access_token,'Content-Type':'application/json'},
@@ -181,4 +168,4 @@ app.get('/display',(_q,res)=>res.redirect('/display.html'));
 app.get('/remote', (_q,res)=>res.redirect('/remote.html'));
 
 app.listen(PORT,()=>console.log(`🚀 Server sur ${PORT}`));
-setInterval(()=>autoFillQueue(),30*1000); // un peu plus long pour limiter les appels
+setInterval(()=>autoFillQueue(),20*1000);
