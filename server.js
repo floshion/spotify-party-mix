@@ -97,9 +97,8 @@ app.post('/add-priority-track', async (req,res)=>{
   const tInfo={ uri, name:track.name, artists:track.artists.map(a=>a.name).join(', '),
                 image:track.album.images?.[0]?.url||'', auto:false };
 
-  // -- on retire les autos, on met le titre en tête
-  priorityQueue = priorityQueue.filter(t=>!t.auto);
-  priorityQueue.unshift(tInfo);
+  // -- on ajoute le titre en fin de file (ordre d'arrivée FIFO)
+  priorityQueue.push(tInfo);
 
   await autoFillQueue();
   res.json({message:'Track added', track:tInfo});
