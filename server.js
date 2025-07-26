@@ -82,7 +82,7 @@ async function autoFillQueue(){
   }
 }
 
-/* ---------- Routes --------------------------------------------------------------- */
+/* ---------- Routes principales --------------------------------------------------- */
 app.get('/token', (_q,res)=>res.json({access_token}));
 
 app.post('/add-priority-track', async (req,res)=>{
@@ -97,7 +97,7 @@ app.post('/add-priority-track', async (req,res)=>{
   const tInfo={ uri, name:track.name, artists:track.artists.map(a=>a.name).join(', '),
                 image:track.album.images?.[0]?.url||'', auto:false };
 
-  /* --- correctif : on enlève les autos puis on met le titre en tête --- */
+  // -- on retire les autos, on met le titre en tête
   priorityQueue = priorityQueue.filter(t=>!t.auto);
   priorityQueue.unshift(tInfo);
 
@@ -118,6 +118,30 @@ app.get('/next-track', async (_q,res)=>{
   res.json({track:next});
 });
 
+/* ---------- Télécommande --------------------------------------------------------- */
+
+/* ⏯ Play / Pause (toggle) */
+app.post('/toggle-play', async (_req, res) => {
+  const st = await fetch('https://api.spotify.com/v1/me/player',
+                         { headers:{Authorization:'Bearer '+access_token} })
+                    .then(r => r.json());
+
+  const path = st.is_playing
+      ? 'https://api.spotify.com/v1/me/player/pause'
+      : 'https://api.spotify.com/v1/me/player/play';
+
+  await fetch(path, { method:'PUT',
+                      headers:{Authorization:'Bearer '+access_token} });
+
+  res.json({ playing: !st.is_playing });
+});
+
+/* ⏭ Passer au prochain morceau dans l’ordre de la file */
+app.post('/skip', async (_req, res) => {
+  const nxt = await fetch('http://localhost:'+PORT+'/next-track').then(r => r.json());
+  res.json(nxt);
+});
+
 /* ---------- Static / boot -------------------------------------------------------- */
 const __filename=fileURLToPath(import.meta.url);
 const __dirname =path.dirname(__filename);
@@ -125,6 +149,7 @@ app.use(express.static(path.join(__dirname,'static')));
 app.get('/', (_q,res)=>res.redirect('/player.html'));
 app.get('/guest', (_q,res)=>res.redirect('/guest.html'));
 app.get('/display', (_q,res)=>res.redirect('/display.html'));
+app.get('/remote',  (_q,res)=>res.redirect('/remote.html'));   // raccourci pour la télécommande
 
 app.listen(PORT,()=>console.log(`🚀 Server sur ${PORT}`));
 setInterval(()=>autoFillQueue(),20*1000);
