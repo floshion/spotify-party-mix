@@ -66,8 +66,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
-    const PLAYLIST_ID = '1g39kHQqy4XHxGGftDiUWb';
-
     const guestUrl = window.location.origin + '/guest.html';
     new QRCode(document.getElementById('qrcode'), { text: guestUrl, width: 200, height: 200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
 
@@ -108,7 +106,7 @@
     async function playNextInOrder() {
       const res = await fetch('/next-track');
       if (!res.ok) {
-        console.log("⚠️ Aucun morceau trouvé, reprise playlist");
+        console.log("⚠️ Aucun morceau trouvé");
         return;
       }
       const data = await res.json();
@@ -130,10 +128,15 @@
           player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
 
           player.addListener('ready', async ({ device_id }) => {
-            await playNextInOrder();
+            console.log("🎧 Player prêt sur device:", device_id);
             document.getElementById('playPauseBtn').disabled = false;
             document.getElementById('nextBtn').disabled      = false;
             updatePriorityQueue();
+            // On lance le premier titre après un petit délai
+            setTimeout(async () => { 
+              await playNextInOrder();
+              console.log("🎵 Lecture initialisée");
+            }, 500);
           });
 
           setInterval(async ()=>{
@@ -178,7 +181,7 @@
             updatePriorityQueue();
           });
 
-          player.connect();
+          await player.connect();
           document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
           document.getElementById('nextBtn').onclick      = async () => { await playNextInOrder(); updatePriorityQueue(); };
           document.getElementById('startBtn').style.display='none';
