@@ -105,24 +105,21 @@
       return `${m}:${s}`;
     }
 
-    async function playPlaylist() {
+    async function playNextInOrder() {
+      const res = await fetch('/next-track');
+      if (!res.ok) {
+        console.log("⚠️ Aucun morceau trouvé, reprise playlist");
+        return;
+      }
+      const data = await res.json();
+      const track = data.track;
       const token = await getToken();
       await fetch('https://api.spotify.com/v1/me/player/play', {
         method :'PUT',
         headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-        body   :JSON.stringify({ context_uri:`spotify:playlist:${PLAYLIST_ID}` })
+        body   :JSON.stringify({ uris:[track.uri] })
       });
-      console.log("🔄 Reprise de la playlist principale");
-    }
-
-    async function playNextPriority() {
-      const res = await fetch('/play-priority', { method:'POST' });
-      if (res.ok) {
-        console.log("▶️ Lecture du titre prioritaire");
-      } else {
-        console.log("ℹ️ File prioritaire vide, reprise playlist");
-        await playPlaylist();
-      }
+      console.log("▶️ Lecture du morceau suivant :", track.name);
     }
 
     let player, currentTrackId = null, playedTime = 0, currentDuration = 0, justHandledEnd = false;
@@ -132,12 +129,8 @@
           const token = await getToken();
           player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
 
-          player.addListener('ready', ({ device_id }) => {
-            fetch(`https://api.spotify.com/v1/me/player/play?device_id=${device_id}`,{
-              method :'PUT',
-              headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-              body   :JSON.stringify({ context_uri:`spotify:playlist:${PLAYLIST_ID}` })
-            });
+          player.addListener('ready', async ({ device_id }) => {
+            await playNextInOrder();
             document.getElementById('playPauseBtn').disabled = false;
             document.getElementById('nextBtn').disabled      = false;
             updatePriorityQueue();
@@ -171,17 +164,15 @@
             document.getElementById('trackName').textContent = track.name;
             document.getElementById('artistName').textContent= track.artists.map(a=>a.name).join(', ');
 
-            // Si nouveau morceau → reset flag
             if (track.id !== currentTrackId) {
               currentTrackId = track.id;
               justHandledEnd = false;
             }
 
-            // Détection fin réelle
             if (!justHandledEnd && state.paused && state.position < 2000 && playedTime >= currentDuration*0.95) {
               justHandledEnd = true;
               console.log("⏭ Passage auto au prochain titre...");
-              await playNextPriority();
+              await playNextInOrder();
             }
 
             updatePriorityQueue();
@@ -189,7 +180,7 @@
 
           player.connect();
           document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
-          document.getElementById('nextBtn').onclick      = async () => { await playNextPriority(); updatePriorityQueue(); };
+          document.getElementById('nextBtn').onclick      = async () => { await playNextInOrder(); updatePriorityQueue(); };
           document.getElementById('startBtn').style.display='none';
           document.getElementById('openDisplayBtn').addEventListener('click', () => window.open('/display.html', '_blank'));
         }catch(e){ console.error(e); }
