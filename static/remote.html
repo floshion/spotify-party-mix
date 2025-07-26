@@ -156,12 +156,24 @@ searchI.oninput = async e=>{
 };
 
 results.onclick = async e=>{
-  const div=e.target.closest('.result');
-  if(!div)return;
-  await fetch('/add-priority-track?uri='+encodeURIComponent(div.dataset.uri),{method:'POST'});
-  toast('Morceau ajouté');
-  searchM.classList.remove('show');
-  queue();
+  const div = e.target.closest('.result');
+  if(!div) return;
+
+  const r = await fetch('/add-priority-track?uri='+encodeURIComponent(div.dataset.uri),
+                        { method:'POST' });
+
+  if (r.ok){
+    toast('Morceau ajouté ✅');
+    searchM.classList.remove('show');
+    queue();
+  } else {
+    const err = await r.json();
+    if (err.error === 'Track already played'){
+      toast('Musique déjà écoutée ❌');
+    } else {
+      toast('Erreur : '+err.error);
+    }
+  }
 };
 
 /* -------- Rafraîchissements -------- */
