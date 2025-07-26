@@ -33,7 +33,6 @@
 </head>
 <body>
   <div class="main-container">
-    <!-- QR code + logo -->
     <div class="qr-container">
       <h3>Invitez vos amis</h3>
       <div id="qrcode"></div>
@@ -41,7 +40,6 @@
       <img src="logo_flo_besset.png" alt="Flo BESSET" class="logo">
     </div>
 
-    <!-- Player -->
     <div class="track-container">
       <img id="albumArt" src="" alt="Album cover">
       <h2 id="trackName">Cliquez sur 'Démarrer'…</h2>
@@ -58,22 +56,21 @@
       <p id="errorMsg"></p>
     </div>
 
-    <!-- File invités -->
     <div class="queue-container"><h3>Morceaux à venir :</h3><ul id="priorityQueueList"></ul></div>
   </div>
 
-  <!-- Scripts -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
     const guestUrl = window.location.origin + '/guest.html';
-    new QRCode(document.getElementById('qrcode'), { text: guestUrl, width: 200, height: 200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+    new QRCode(document.getElementById('qrcode'),
+      { text: guestUrl, width: 200, height: 200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
 
     async function getToken(){
       const res = await fetch('/token');
       const data = await res.json();
       if(!data.access_token){
-        document.getElementById('errorMsg').textContent = "Erreur d'authentification Spotify. Rechargez la page ou reconnectez-vous.";
+        document.getElementById('errorMsg').textContent = "Erreur d'auth Spotify.";
         throw new Error('Token invalide');
       }
       return data.access_token;
@@ -84,18 +81,12 @@
       const data = await res.json();
       const list = document.getElementById('priorityQueueList');
       list.innerHTML = '';
-      data.queue.forEach(track=>{
-        const li  = document.createElement('li');
-        const img = document.createElement('img');
-        img.src   = track.image;
-        const span= document.createElement('span');
-        span.textContent = `${track.name} – ${track.artists}` + (track.auto?' (Auto)':'');
-        li.appendChild(img); li.appendChild(span);
-        list.appendChild(li);
+      data.queue.forEach(t=>{
+        list.insertAdjacentHTML('beforeend',
+          `<li><img src="${t.image}"><span>${t.name} – ${t.artists}${t.auto?' (Auto)':''}</span></li>`);
       });
-      return data.queue;
     }
-    setInterval(updatePriorityQueue, 5000);
+    setInterval(updatePriorityQueue,5000);
 
     function formatTime(ms){
       const m = Math.floor(ms/60000);
@@ -103,91 +94,74 @@
       return `${m}:${s}`;
     }
 
-    async function playNextInOrder() {
-      const res = await fetch('/next-track');
-      if (!res.ok) {
-        console.log("⚠️ Aucun morceau trouvé");
-        return;
-      }
-      const data = await res.json();
-      const track = data.track;
+    let player, webDeviceId=null,
+        currentTrackId=null, playedTime=0, currentDuration=0, justHandledEnd=false;
+
+    async function playNextInOrder(){
+      const r = await fetch('/next-track');
+      if(!r.ok) return console.log("⚠️ Pas de morceau");
+      const {track} = await r.json();
       const token = await getToken();
-      await fetch('https://api.spotify.com/v1/me/player/play', {
-        method :'PUT',
-        headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-        body   :JSON.stringify({ uris:[track.uri] })
+      await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${webDeviceId}`,{
+        method:'PUT',
+        headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({uris:[track.uri]})
       });
-      console.log("▶️ Lecture du morceau suivant :", track.name);
+      console.log('▶️',track.name);
     }
 
-    let player, currentTrackId = null, playedTime = 0, currentDuration = 0, justHandledEnd = false;
-    window.onSpotifyWebPlaybackSDKReady = () => {
-      document.getElementById('startBtn').addEventListener('click', async () => {
+    window.onSpotifyWebPlaybackSDKReady = ()=> {
+      document.getElementById('startBtn').onclick = async ()=>{
         try{
           const token = await getToken();
-          player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
-
-          player.addListener('ready', async ({ device_id }) => {
-            console.log("🎧 Player prêt sur device:", device_id);
-            document.getElementById('playPauseBtn').disabled = false;
-            document.getElementById('nextBtn').disabled      = false;
-            updatePriorityQueue();
-            // On lance le premier titre après un petit délai
-            setTimeout(async () => { 
-              await playNextInOrder();
-              console.log("🎵 Lecture initialisée");
-            }, 500);
+          player = new Spotify.Player({name:'DJ Player',getOAuthToken:cb=>cb(token),volume:1});
+          player.addListener('ready', async ({device_id})=>{
+            webDeviceId = device_id;
+            console.log('🎧 Device:',device_id);
+            document.getElementById('playPauseBtn').disabled=false;
+            document.getElementById('nextBtn').disabled=false;
+            await updatePriorityQueue();
+            setTimeout(playNextInOrder,500);      // lance le premier titre
           });
 
           setInterval(async ()=>{
-            const state = await player.getCurrentState();
-            if(state && !state.paused){
-              playedTime = state.position;
-              currentDuration = state.duration;
-              document.getElementById('progressBar').style.width = ((state.position/state.duration)*100)+'%';
-              document.getElementById('seekBar').value = (state.position/state.duration)*100;
-              document.getElementById('currentTime').textContent = formatTime(state.position);
-              document.getElementById('totalTime').textContent   = formatTime(state.duration);
+            const st = await player.getCurrentState();
+            if(st && !st.paused){
+              playedTime = st.position; currentDuration = st.duration;
+              document.getElementById('progressBar').style.width=((st.position/st.duration)*100)+'%';
+              document.getElementById('seekBar').value=(st.position/st.duration)*100;
+              document.getElementById('currentTime').textContent=formatTime(st.position);
+              document.getElementById('totalTime').textContent=formatTime(st.duration);
             }
           },1000);
 
-          document.getElementById('seekBar').addEventListener('input', async (e) => {
-            const position = (e.target.value/100) * currentDuration;
+          document.getElementById('seekBar').oninput = async e=>{
+            const pos = (e.target.value/100)*currentDuration;
             const token = await getToken();
-            await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${Math.floor(position)}`, {
-              method: 'PUT',
-              headers: { 'Authorization': 'Bearer ' + token }
-            });
-          });
+            await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${Math.floor(pos)}&device_id=${webDeviceId}`,{
+              method:'PUT',headers:{Authorization:'Bearer '+token}});
+          };
 
-          player.addListener('player_state_changed', async state => {
-            if(!state) return;
-            const track = state.track_window.current_track;
-            document.getElementById('albumArt').src          = track.album.images[0].url;
-            document.getElementById('trackName').textContent = track.name;
-            document.getElementById('artistName').textContent= track.artists.map(a=>a.name).join(', ');
-
-            if (track.id !== currentTrackId) {
-              currentTrackId = track.id;
-              justHandledEnd = false;
+          player.addListener('player_state_changed', async st=>{
+            if(!st) return;
+            const tr = st.track_window.current_track;
+            document.getElementById('albumArt').src=tr.album.images[0].url;
+            document.getElementById('trackName').textContent=tr.name;
+            document.getElementById('artistName').textContent=tr.artists.map(a=>a.name).join(', ');
+            if(tr.id!==currentTrackId){currentTrackId=tr.id;justHandledEnd=false;}
+            if(!justHandledEnd && st.paused && st.position<2000 && playedTime>=currentDuration*0.95){
+              justHandledEnd=true;console.log('⏭ Auto-next');await playNextInOrder();
             }
-
-            if (!justHandledEnd && state.paused && state.position < 2000 && playedTime >= currentDuration*0.95) {
-              justHandledEnd = true;
-              console.log("⏭ Passage auto au prochain titre...");
-              await playNextInOrder();
-            }
-
             updatePriorityQueue();
           });
 
           await player.connect();
-          document.getElementById('playPauseBtn').onclick = () => player.togglePlay();
-          document.getElementById('nextBtn').onclick      = async () => { await playNextInOrder(); updatePriorityQueue(); };
+          document.getElementById('playPauseBtn').onclick = ()=>player.togglePlay();
+          document.getElementById('nextBtn').onclick      = async ()=>{await playNextInOrder();updatePriorityQueue();};
           document.getElementById('startBtn').style.display='none';
-          document.getElementById('openDisplayBtn').addEventListener('click', () => window.open('/display.html', '_blank'));
-        }catch(e){ console.error(e); }
-      });
+          document.getElementById('openDisplayBtn').onclick = ()=>window.open('/display.html','_blank');
+        }catch(e){console.error(e);}
+      };
     };
   </script>
 </body>
