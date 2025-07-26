@@ -35,6 +35,7 @@
     .modal-header { padding: 10px; }
     .modal-header input { width: 100%; padding: 12px 15px; font-size: 16px; border-radius: 25px; border: none; outline: none; background: #2c2c2e; color: #fff; }
     .modal-results { flex: 1; overflow-y: auto; padding: 10px; }
+    #suggestions h3 { font-size: 16px; margin-bottom: 8px; color: #1DB954; }
     .result { display: flex; align-items: center; background: #1c1c1e; padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
     .result:hover { background: #2c2c2e; }
     .result img { width: 50px; height: 50px; border-radius: 8px; margin-right: 12px; }
@@ -94,6 +95,7 @@
     <div class="modal-header">
       <input type="text" id="searchInput" placeholder="Rechercher un titre..." autofocus />
     </div>
+    <div id="suggestions" style="padding:10px;"></div>
     <div class="modal-results" id="results"></div>
   </div>
 
@@ -156,22 +158,30 @@
       return data.tracks.items;
     }
 
-   async function addTrackToPriority(uri) {
-  const res = await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
-  const data = await res.json();
-  if (data.error) {
-    showToast("Musique déjà écoutée !");
-    return;
-  }
-  showToast("Morceau ajouté !");
-  updateQueue();
-  closeModal();
-}
+    async function fetchSuggestions(query) {
+      const res = await fetch("/suggest?q=" + encodeURIComponent(query));
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.suggestions || [];
+    }
+
+    async function addTrackToPriority(uri) {
+      const res = await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
+      const data = await res.json();
+      if (data.error) {
+        showToast("Musique déjà écoutée !");
+        return;
+      }
+      showToast("Morceau ajouté !");
+      updateQueue();
+      closeModal();
+    }
 
     function openModal() {
       const modal = document.getElementById("searchModal");
       document.getElementById("searchInput").value = "";
       document.getElementById("results").innerHTML = "";
+      document.getElementById("suggestions").innerHTML = "";
       modal.classList.add("show");
     }
 
@@ -195,6 +205,25 @@
       if (query.length < 2) return;
       const token = await getToken();
       const tracks = await searchTracks(query, token);
+
+      // suggestions
+      const suggDiv = document.getElementById("suggestions");
+      suggDiv.innerHTML = "";
+      const suggestions = await fetchSuggestions(query);
+      if(suggestions.length>0){
+        const title = document.createElement("h3");
+        title.textContent = "Suggestions qui collent au morceau actuel :";
+        suggDiv.appendChild(title);
+        suggestions.forEach(sugg => {
+          const sdiv = document.createElement("div");
+          sdiv.className = "result";
+          sdiv.innerHTML = `<img src="${sugg.image}" /><div><strong>${sugg.name}</strong><span>${sugg.artists}</span></div>`;
+          sdiv.onclick = () => addTrackToPriority(sugg.uri);
+          suggDiv.appendChild(sdiv);
+        });
+      }
+
+      // résultats classiques
       const resultsDiv = document.getElementById("results");
       resultsDiv.innerHTML = "";
       tracks.forEach(track => {
