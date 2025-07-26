@@ -102,23 +102,6 @@
       return `${m}:${s}`;
     }
 
-    // --- Activer crossfade natif Spotify ---
-    async function enableCrossfade(duration = 5000) {
-      const tokenRes = await fetch('/token');
-      const { access_token } = await tokenRes.json();
-      await fetch('https://api.spotify.com/v1/me/player', {
-        method: 'PUT',
-        headers: {
-          'Authorization': 'Bearer ' + access_token,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          playback_settings: { crossfade_state: { duration_ms: duration } }
-        })
-      });
-      console.log('🎚️ Crossfade activé :', duration/1000, 'secondes');
-    }
-
     let player;
     window.onSpotifyWebPlaybackSDKReady = () => {
       document.getElementById('startBtn').addEventListener('click', async () => {
@@ -127,7 +110,7 @@
           player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
 
           player.addListener('ready', ({ device_id }) => {
-            // Lance la playlist
+            // Lecture contextuelle de la playlist
             fetch(`https://api.spotify.com/v1/me/player/play?device_id=${device_id}`,{
               method :'PUT',
               headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
@@ -136,9 +119,6 @@
             document.getElementById('playPauseBtn').disabled = false;
             document.getElementById('nextBtn').disabled      = false;
             updatePriorityQueue();
-
-            // Active le crossfade 5s
-            enableCrossfade(5000);
           });
 
           setInterval(async ()=>{
@@ -164,12 +144,6 @@
             document.getElementById('totalTime').textContent   = formatTime(duration);
 
             updatePriorityQueue();
-
-            // --- Auto-next : si le morceau est fini, on passe au suivant ---
-            if (state.position === 0 && state.paused && state.track_window.previous_tracks.length) {
-              console.log('⏭ Passage auto au prochain titre');
-              fetch('/play-priority', { method: 'POST' }).then(() => updatePriorityQueue());
-            }
           });
 
           player.connect();
