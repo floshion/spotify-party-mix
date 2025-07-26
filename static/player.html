@@ -125,7 +125,7 @@
       }
     }
 
-    let player, currentTrackId = null, playedTime = 0, currentDuration = 0;
+    let player, currentTrackId = null, playedTime = 0, currentDuration = 0, justHandledEnd = false;
     window.onSpotifyWebPlaybackSDKReady = () => {
       document.getElementById('startBtn').addEventListener('click', async () => {
         try{
@@ -171,13 +171,19 @@
             document.getElementById('trackName').textContent = track.name;
             document.getElementById('artistName').textContent= track.artists.map(a=>a.name).join(', ');
 
-            // Détection fin réelle : au moins 80% lu ou 20s
-            if (currentTrackId && currentTrackId !== track.id && (playedTime > currentDuration*0.8 || playedTime > 20000)) {
+            // Si nouveau morceau → reset flag
+            if (track.id !== currentTrackId) {
+              currentTrackId = track.id;
+              justHandledEnd = false;
+            }
+
+            // Détection fin réelle
+            if (!justHandledEnd && state.paused && state.position < 2000 && playedTime >= currentDuration*0.95) {
+              justHandledEnd = true;
               console.log("⏭ Passage auto au prochain titre...");
               await playNextPriority();
             }
 
-            currentTrackId = track.id;
             updatePriorityQueue();
           });
 
