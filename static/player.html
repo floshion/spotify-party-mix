@@ -27,6 +27,7 @@
     #errorMsg{color:#ff4444;font-size:16px;margin-top:10px}
     .progress-container{width:100%;max-width:320px;height:8px;background:#333;border-radius:4px;margin-top:15px}
     .progress-bar{height:100%;background:#1DB954;width:0%;border-radius:4px}
+    #seekBar{width:100%;max-width:320px;margin-top:10px;}
     .time-info{display:flex;justify-content:space-between;width:100%;max-width:320px;font-size:14px;color:#aaa;margin-top:5px}
   </style>
 </head>
@@ -46,6 +47,7 @@
       <h2 id="trackName">Cliquez sur 'Démarrer'…</h2>
       <p id="artistName"></p>
       <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
+      <input type="range" id="seekBar" min="0" max="100" value="0">
       <div class="time-info"><span id="currentTime">0:00</span><span id="totalTime">0:00</span></div>
       <div class="controls">
         <button class="btn" id="playPauseBtn" disabled>⏯ Play/Pause</button>
@@ -123,7 +125,7 @@
       }
     }
 
-    let player;
+    let player, currentTrackId = null, playedTime = 0, currentDuration = 0;
     window.onSpotifyWebPlaybackSDKReady = () => {
       document.getElementById('startBtn').addEventListener('click', async () => {
         try{
@@ -131,7 +133,6 @@
           player = new Spotify.Player({ name:'DJ Player', getOAuthToken:cb=>cb(token), volume:1.0 });
 
           player.addListener('ready', ({ device_id }) => {
-            // Lecture contextuelle
             fetch(`https://api.spotify.com/v1/me/player/play?device_id=${device_id}`,{
               method :'PUT',
               headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
@@ -145,12 +146,23 @@
           setInterval(async ()=>{
             const state = await player.getCurrentState();
             if(state && !state.paused){
-              const { position, duration } = state;
-              document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
-              document.getElementById('currentTime').textContent = formatTime(position);
-              document.getElementById('totalTime').textContent   = formatTime(duration);
+              playedTime = state.position;
+              currentDuration = state.duration;
+              document.getElementById('progressBar').style.width = ((state.position/state.duration)*100)+'%';
+              document.getElementById('seekBar').value = (state.position/state.duration)*100;
+              document.getElementById('currentTime').textContent = formatTime(state.position);
+              document.getElementById('totalTime').textContent   = formatTime(state.duration);
             }
           },1000);
+
+          document.getElementById('seekBar').addEventListener('input', async (e) => {
+            const position = (e.target.value/100) * currentDuration;
+            const token = await getToken();
+            await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${Math.floor(position)}`, {
+              method: 'PUT',
+              headers: { 'Authorization': 'Bearer ' + token }
+            });
+          });
 
           player.addListener('player_state_changed', async state => {
             if(!state) return;
@@ -159,17 +171,13 @@
             document.getElementById('trackName').textContent = track.name;
             document.getElementById('artistName').textContent= track.artists.map(a=>a.name).join(', ');
 
-            const { position, duration } = state;
-            document.getElementById('progressBar').style.width = ((position/duration)*100)+'%';
-            document.getElementById('currentTime').textContent = formatTime(position);
-            document.getElementById('totalTime').textContent   = formatTime(duration);
-
-            // Quand un morceau se termine → enchaîner
-            if (state.position === 0 && state.paused && state.track_window.previous_tracks.length) {
+            // Détection fin réelle : au moins 80% lu ou 20s
+            if (currentTrackId && currentTrackId !== track.id && (playedTime > currentDuration*0.8 || playedTime > 20000)) {
               console.log("⏭ Passage auto au prochain titre...");
               await playNextPriority();
             }
 
+            currentTrackId = track.id;
             updatePriorityQueue();
           });
 
