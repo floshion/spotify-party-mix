@@ -138,18 +138,34 @@ app.post('/toggle-play', async (_req, res) => {
 
 /* ⏭ Passer au prochain morceau dans l’ordre de la file */
 app.post('/skip', async (_req, res) => {
-  const nxt = await fetch('http://localhost:'+PORT+'/next-track').then(r => r.json());
-  res.json(nxt);
+  // 1. on récupère le prochain titre
+  const next = await fetch('http://localhost:'+PORT+'/next-track').then(r=>r.json());
+  if (!next.track) return res.status(400).json({error:'No track'});
+
+  // 2. on trouve le device actif (Web Playback)
+  const info = await fetch('https://api.spotify.com/v1/me/player',
+    {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
+  const deviceId = info?.device?.id;
+  if(!deviceId) return res.status(500).json({error:'No active device'});
+
+  // 3. on lance le morceau immédiatement
+  await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
+    method:'PUT',
+    headers:{Authorization:'Bearer '+access_token,'Content-Type':'application/json'},
+    body:JSON.stringify({uris:[next.track.uri]})
+  });
+
+  res.json(next);
 });
 
 /* ---------- Static / boot -------------------------------------------------------- */
 const __filename=fileURLToPath(import.meta.url);
 const __dirname =path.dirname(__filename);
 app.use(express.static(path.join(__dirname,'static')));
-app.get('/', (_q,res)=>res.redirect('/player.html'));
-app.get('/guest', (_q,res)=>res.redirect('/guest.html'));
-app.get('/display', (_q,res)=>res.redirect('/display.html'));
-app.get('/remote',  (_q,res)=>res.redirect('/remote.html'));   // raccourci pour la télécommande
+app.get('/',     (_q,res)=>res.redirect('/player.html'));
+app.get('/guest',(_q,res)=>res.redirect('/guest.html'));
+app.get('/display',(_q,res)=>res.redirect('/display.html'));
+app.get('/remote', (_q,res)=>res.redirect('/remote.html'));
 
 app.listen(PORT,()=>console.log(`🚀 Server sur ${PORT}`));
 setInterval(()=>autoFillQueue(),20*1000);
