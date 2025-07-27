@@ -267,16 +267,62 @@ app.get('/playlists', async (_req, res) => {
 app.post('/set-playlist', async (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Missing id' });
+  // Met à jour la playlist source pour l’auto‑remplissage sans perdre les
+  // morceaux ajoutés par les invités.  On ne vide plus totalement
+  // priorityQueue ni l’historique des morceaux joués : les invités doivent
+  // conserver la priorité sur la nouvelle playlist et les morceaux déjà
+  // joués restent bloqués pendant la fenêtre de 2 heures.
   SOURCE_PLAYLIST = id;
-  // Réinitialise l’état interne
-  priorityQueue = [];
-  playedTracks  = new Map();
+  // Filtre la file d’attente pour ne conserver que les morceaux ajoutés
+  // manuellement (auto=false).  Les morceaux automatiques seront
+  // remplacés par ceux de la nouvelle playlist via autoFillQueue().
+  priorityQueue = priorityQueue.filter(t => !t.auto);
   try {
     await autoFillQueue();
     res.json({ message: 'Playlist changed', playlist: id });
   } catch (e) {
     console.error('Erreur lors du changement de playlist', e);
     res.status(500).json({ error: 'Failed to change playlist' });
+  }
+});
+
+/* ---------- Recommandations basées sur le morceau en cours --------------- */
+// Fournit une liste de morceaux recommandés qui s’accordent avec le morceau
+// actuellement en cours de lecture.  Cette route utilise l’API Spotify pour
+// récupérer le morceau en cours (seed) puis des recommandations basées sur
+// ce morceau.  Elle renvoie jusqu’à 4 morceaux avec leur URI, nom,
+// artistes et pochette.  Si aucun titre n’est en cours, elle renvoie un
+// tableau vide.
+app.get('/recommendations', async (_req, res) => {
+  try {
+    // Récupère le morceau actuellement en lecture sur le compte Spotify
+    const now = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+    if (!now.ok) {
+      return res.json({ tracks: [] });
+    }
+    const json = await now.json();
+    if (!json || !json.item) {
+      return res.json({ tracks: [] });
+    }
+    const seedId = json.item.id;
+    // Utilise l’endpoint recommendations de Spotify pour récupérer des titres
+    // similaires.  On passe le morceau en seed, limite 4, marché FR.
+    const rec = await fetch(`https://api.spotify.com/v1/recommendations?seed_tracks=${seedId}&limit=4&market=FR`, {
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+    const recJson = await rec.json();
+    const tracks = (recJson.tracks || []).map(t => ({
+      uri:    t.uri,
+      name:   t.name,
+      artists: t.artists.map(a => a.name).join(', '),
+      image:  t.album.images?.[0]?.url || ''
+    }));
+    res.json({ tracks });
+  } catch (err) {
+    console.error('Erreur lors de la récupération des recommandations', err);
+    res.status(500).json({ error: 'Failed to get recommendations' });
   }
 });
 
