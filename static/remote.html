@@ -95,6 +95,13 @@ const searchI = document.getElementById('searchI');
 const results = document.getElementById('results');
 
 /* -------- Utils -------- */
+// Récupère la clé de session unique pour cette soirée et fixe le nom
+// d’utilisateur pour la télécommande. La clé est utilisée lors de
+// l’ajout d’un morceau pour éviter qu’un invité d’une soirée précédente
+// puisse utiliser un ancien lien.
+let sessionKeyRemote = '';
+const guestNameRemote = 'DJ';
+fetch('/session-key').then(r => r.json()).then(d => { sessionKeyRemote = d.key; });
 function toast(msg){toastEl.textContent=msg;toastEl.style.opacity=1;setTimeout(()=>toastEl.style.opacity=0,2000);}
 async function getToken(){return (await (await fetch('/token')).json()).access_token;}
 function time(ms){const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000).toString().padStart(2,'0');return m+':'+s;}
@@ -116,11 +123,13 @@ async function now(){
 
 /* -------- File d'attente -------- */
 async function queue(){
-  const q=await (await fetch('/priority-queue')).json();
-  list.innerHTML='';
-  q.queue.forEach(t=>{
+  const q = await (await fetch('/priority-queue')).json();
+  list.innerHTML = '';
+  q.queue.forEach(t => {
+    const by = t.guest || t.guestName || (t.auto ? 'Auto' : '');
     list.insertAdjacentHTML('beforeend',
-      `<div class="item"><img src="${t.image}"><div><strong>${t.name}</strong><span>${t.artists}</span></div></div>`);
+      `<div class="item"><img src="${t.image}">` +
+      `<div><strong>${t.name}</strong><span>${t.artists}${by ? ' • ' + by : ''}</span></div></div>`);
   });
 }
 
@@ -159,19 +168,26 @@ results.onclick = async e=>{
   const div = e.target.closest('.result');
   if(!div) return;
 
-  const r = await fetch('/add-priority-track?uri='+encodeURIComponent(div.dataset.uri),
-                        { method:'POST' });
-
-  if (r.ok){
+  // Construit l’URL avec la clé de session et le nom d’utilisateur
+  const url = '/add-priority-track?uri=' + encodeURIComponent(div.dataset.uri) +
+              '&guest=' + encodeURIComponent(guestNameRemote) +
+              '&key='   + encodeURIComponent(sessionKeyRemote);
+  const r = await fetch(url, { method:'POST' });
+  const data = await r.json();
+  if (r.ok && !data.error) {
     toast('Morceau ajouté ✅');
     searchM.classList.remove('show');
     queue();
   } else {
-    const err = await r.json();
-    if (err.error === 'Track already played'){
+    // Gestion des messages d’erreur pour la télécommande
+    if (data.error === 'Track already played') {
       toast('Musique déjà écoutée ❌');
+    } else if (data.error === 'Limit per guest reached') {
+      toast('Limite de 2 morceaux atteinte ❌');
+    } else if (data.error === 'Invalid session key') {
+      toast('Session expirée ❌');
     } else {
-      toast('Erreur : '+err.error);
+      toast('Erreur : ' + data.error);
     }
   }
 };

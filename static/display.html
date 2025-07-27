@@ -154,11 +154,18 @@
   <!-- Scripts -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script>
-    const guestUrl = window.location.origin + '/guest.html';
-    new QRCode(document.getElementById('qrcode'), {
-      text: guestUrl, width: 300, height: 300,
-      colorDark:'#ffffff', colorLight:'#000000',
-      correctLevel:QRCode.CorrectLevel.H
+    // Génération dynamique de l’URL invité à partir de la clé de session.
+    // La clé est récupérée auprès du serveur afin que chaque soirée dispose
+    // d’un QR code différent.
+    let sessionKey = '';
+    fetch('/session-key').then(r => r.json()).then(d => {
+      sessionKey = d.key;
+      const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+      new QRCode(document.getElementById('qrcode'), {
+        text: guestUrl, width: 300, height: 300,
+        colorDark:'#ffffff', colorLight:'#000000',
+        correctLevel:QRCode.CorrectLevel.H
+      });
     });
 
     async function getToken(){
@@ -177,8 +184,10 @@
         const img = document.createElement('img');
         img.src   = track.image;
         const span= document.createElement('span');
-        span.textContent = `${track.name} – ${track.artists}`;
-        li.appendChild(img); li.appendChild(span);
+        const by  = track.guest || track.guestName || (track.auto ? 'Auto' : '');
+        span.textContent = `${track.name} – ${track.artists}${by ? ' • ' + by : ''}`;
+        li.appendChild(img);
+        li.appendChild(span);
         list.appendChild(li);
       });
     }

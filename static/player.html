@@ -62,9 +62,17 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
-    const guestUrl = window.location.origin + '/guest.html';
-    new QRCode(document.getElementById('qrcode'),
-      { text: guestUrl, width: 200, height: 200, colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+    // Construire l’URL invité avec la clé de session fournie par le serveur.
+    // On récupère d’abord la clé, puis on génère le QR code. Cela évite que
+    // l’URL reste identique d’une soirée à l’autre.
+    let sessionKey = '';
+    fetch('/session-key').then(r => r.json()).then(d => {
+      sessionKey = d.key;
+      const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+      new QRCode(document.getElementById('qrcode'),
+        { text: guestUrl, width: 200, height: 200,
+          colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+    });
 
     async function getToken(){
       const res = await fetch('/token');
@@ -82,8 +90,9 @@
       const list = document.getElementById('priorityQueueList');
       list.innerHTML = '';
       data.queue.forEach(t=>{
+        const by = t.guest || t.guestName || (t.auto ? 'Auto' : '');
         list.insertAdjacentHTML('beforeend',
-          `<li><img src="${t.image}"><span>${t.name} – ${t.artists}${t.auto?' (Auto)':''}</span></li>`);
+          `<li><img src="${t.image}"><span>${t.name} – ${t.artists}${by ? ' • ' + by : ''}</span></li>`);
       });
     }
     setInterval(updatePriorityQueue,5000);

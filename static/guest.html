@@ -101,6 +101,29 @@
   <div id="toast"></div>
 
   <script>
+    // Variables de session et identification de l’invité
+    // Une clé de session unique est fournie par le serveur pour chaque soirée. Elle
+    // est utilisée pour sécuriser l’ajout de morceaux afin qu’un ancien lien QR ne
+    // permette pas de continuer à interagir avec la playlist. Le prénom est
+    // demandé une seule fois et conservé localement.
+    let sessionKey = '';
+    let guestName  = localStorage.getItem('guestName');
+    if (!guestName) {
+      guestName = prompt('Quel est ton prénom ?') || 'Invité';
+      localStorage.setItem('guestName', guestName);
+    }
+    // Récupère la clé de session depuis le paramètre d’URL (?key=...).
+    // Si aucune clé n’est fournie (accès direct), on demande la clé au serveur.
+    {
+      const params = new URLSearchParams(window.location.search);
+      const keyParam = params.get('key');
+      if (keyParam) {
+        sessionKey = keyParam;
+      } else {
+        fetch('/session-key').then(res => res.json()).then(d => { sessionKey = d.key; });
+      }
+    }
+
     async function getToken() {
       const res = await fetch('/token');
       const data = await res.json();
@@ -143,7 +166,11 @@
       queue.forEach(track => {
         const div = document.createElement('div');
         div.className = 'queue-item';
-        div.innerHTML = `<img src=\"${track.image}\" /><div><strong>${track.name}</strong><span>${track.artists}</span></div>`;
+        // Détermine qui a ajouté le morceau (invité ou auto)
+        const by = track.guest || track.guestName || (track.auto ? 'Auto' : '');
+        div.innerHTML = `<img src="${track.image}" />` +
+                        `<div><strong>${track.name}</strong>` +
+                        `<span>${track.artists}${by ? ' • ' + by : ''}</span></div>`;
         container.appendChild(div);
       });
     }
@@ -157,10 +184,22 @@
     }
 
    async function addTrackToPriority(uri) {
-  const res = await fetch("/add-priority-track?uri=" + encodeURIComponent(uri), { method: "POST" });
+  // Compose l’URL avec la clé de session et le prénom pour identifier l’invité
+  const url = "/add-priority-track?uri=" + encodeURIComponent(uri) +
+              "&guest=" + encodeURIComponent(guestName) +
+              "&key=" + encodeURIComponent(sessionKey);
+  const res = await fetch(url, { method: "POST" });
   const data = await res.json();
-  if (data.error) {
-    showToast("Musique déjà écoutée !");
+  if (!res.ok || data.error) {
+    if (data.error === 'Track already played') {
+      showToast("Musique déjà écoutée !");
+    } else if (data.error === 'Limit per guest reached') {
+      showToast("Tu as déjà ajouté 2 morceaux d’affilée !");
+    } else if (data.error === 'Invalid session key') {
+      showToast("Session expirée, recharge la page.");
+    } else {
+      showToast("Erreur : " + data.error);
+    }
     return;
   }
   showToast("Morceau ajouté !");
