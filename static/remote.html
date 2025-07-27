@@ -228,16 +228,45 @@ async function queue(){
     // Ne pas afficher le label "Auto" pour les morceaux automatiques afin
     // d’épurer l’affichage et rendre l’étiquette réservée aux invités.
     const byName = t.auto ? '' : (t.guest || t.guestName || '');
-    const html = `<div class="item"><img src="${t.image}"><div><strong>${t.name}</strong>` +
-                 `<span>${t.artists}</span>` +
-                 (byName ? `<span class="by">Ajouté par ${byName}</span>` : '') +
-                 `</div></div>`;
+    // Construction de la ligne de morceau.  On inclut un bouton de
+    // suppression uniquement pour les morceaux invités (auto=false).  Le
+    // bouton appelle la fonction removeTrack avec l’URI du morceau.
+    let details = `<strong>${t.name}</strong><span>${t.artists}</span>`;
+    if (byName) details += `<span class="by">Ajouté par ${byName}</span>`;
+    // Le conteneur flex permet de placer le bouton de suppression à droite.
+    const html = t.auto
+      ? `<div class="item"><img src="${t.image}"><div style="flex:1;">${details}</div></div>`
+      : `<div class="item"><img src="${t.image}"><div style="flex:1;">${details}</div>` +
+        `<button onclick="removeTrack('${t.uri}')" class="delBtn" style="background:none;border:none;color:#e74c3c;font-size:20px;cursor:pointer;">❌</button>` +
+        `</div>`;
     if (t.auto) {
       autoListEl.insertAdjacentHTML('beforeend', html);
     } else {
       guestListEl.insertAdjacentHTML('beforeend', html);
     }
   });
+}
+
+/* -------- Suppression de morceaux depuis la télécommande -------- */
+// Cette fonction est appelée lorsqu’un utilisateur (DJ) clique sur le bouton
+// ❌ d’un morceau dans la file d’attente.  Elle envoie une requête au
+// serveur pour supprimer le morceau correspondant à l’URI puis rafraîchit
+// l’affichage de la file.  Un message toast informe l’utilisateur de
+// l’issue de l’opération.
+async function removeTrack(uri) {
+  try {
+    const res = await fetch('/remove-priority-track?uri=' + encodeURIComponent(uri), { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast('Morceau supprimé ❌');
+    } else {
+      toast('Erreur : ' + (data.error || 'Suppression impossible'));
+    }
+  } catch (e) {
+    toast('Erreur lors de la suppression');
+  }
+  // Rafraîchit systématiquement la file d’attente après la requête
+  queue();
 }
 
 /* -------- Télécommande -------- */
