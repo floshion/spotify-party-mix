@@ -81,6 +81,12 @@
       </div>
       <button class="btn" id="startBtn">▶️ Démarrer le lecteur</button>
       <button class="btn" id="openDisplayBtn">📺 Mode TV</button>
+      <!-- Sélecteur de playlist et nouvelle soirée pour l’admin -->
+      <div id="adminControls" style="margin-top:15px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px;">
+        <label style="font-size:14px;color:#aaa;">Choisir une playlist :</label>
+        <select id="playlistSelect" style="padding:8px;border-radius:5px;font-size:16px;"></select>
+        <button class="btn" id="newSessionBtn" style="background:#e53935;">🎉 Démarrer une nouvelle soirée</button>
+      </div>
       <p id="errorMsg"></p>
     </div>
 
@@ -110,6 +116,49 @@
       new QRCode(document.getElementById('qrcode'),
         { text: guestUrl, width: 200, height: 200,
           colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+    });
+
+    // Charger les playlists de l’utilisateur et peupler le sélecteur. Lorsque
+    // l’admin choisit une autre playlist, on notifie le serveur de la
+    // nouvelle sélection et on met à jour la file d’attente.  On met également
+    // à disposition un bouton pour démarrer une nouvelle soirée, qui génère
+    // une nouvelle clé de session et remet à zéro l’historique.
+    async function loadPlaylists() {
+      try {
+        const res  = await fetch('/playlists');
+        const data = await res.json();
+        const sel  = document.getElementById('playlistSelect');
+        sel.innerHTML = '';
+        data.playlists.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Impossible de charger les playlists', e);
+      }
+    }
+    loadPlaylists();
+    document.getElementById('playlistSelect').addEventListener('change', async function() {
+      const id = this.value;
+      if (!id) return;
+      await fetch('/set-playlist?id=' + encodeURIComponent(id), { method: 'POST' });
+      updatePriorityQueue();
+    });
+    document.getElementById('newSessionBtn').addEventListener('click', async () => {
+      const r = await fetch('/reset-session', { method: 'POST' });
+      if (!r.ok) return;
+      const d = await r.json();
+      sessionKey = d.key;
+      // Génère un nouveau QR code avec la nouvelle clé
+      const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+      document.getElementById('qrcode').innerHTML = '';
+      new QRCode(document.getElementById('qrcode'),
+        { text: guestUrl, width: 200, height: 200,
+          colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+      // Met à jour la file d’attente pour refléter la nouvelle session
+      updatePriorityQueue();
     });
 
     async function getToken(){

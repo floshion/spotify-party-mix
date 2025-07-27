@@ -209,7 +209,9 @@
       guestList.innerHTML = '';
       autoList.innerHTML  = '';
       data.queue.forEach(track => {
-        const by = track.guest || track.guestName || (track.auto ? 'Auto' : '');
+      // N’affiche pas « Auto » pour les morceaux automatiques ;
+      // seule l’origine des invités est mise en avant.
+      const by = track.auto ? '' : (track.guest || track.guestName || '');
         const li = document.createElement('li');
         const img = document.createElement('img');
         img.src = track.image;

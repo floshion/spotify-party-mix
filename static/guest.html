@@ -282,18 +282,22 @@
   const res = await fetch(url, { method: "POST" });
   const data = await res.json();
   if (!res.ok || data.error) {
+    // Gestion détaillée des erreurs.  Pour un morceau déjà joué, on
+    // affiche qui l’a joué et le temps restant avant réutilisation.
     if (data.error === 'Track already played') {
-      showToast("Musique déjà écoutée !");
+      const by  = data.by || 'quelqu’un';
+      const mins = data.remainingMinutes != null ? data.remainingMinutes : '';
+      showToast(`Cette musique a déjà été jouée par ${by}, disponible dans ${mins} min.`);
     } else if (data.error === 'Limit per guest reached') {
-      showToast("Tu as déjà ajouté 2 morceaux d’affilée !");
+      showToast("Tu as déjà ajouté 2 morceaux d’affilée !");
     } else if (data.error === 'Invalid session key') {
       showToast("Session expirée, recharge la page.");
     } else {
-      showToast("Erreur : " + data.error);
+      showToast("Erreur : " + data.error);
     }
     return;
   }
-  showToast("Morceau ajouté !");
+  showToast("Morceau ajouté !");
   updateQueue();
   closeModal();
 }

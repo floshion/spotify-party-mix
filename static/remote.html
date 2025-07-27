@@ -201,15 +201,17 @@ results.onclick = async e=>{
     searchM.classList.remove('show');
     queue();
   } else {
-    // Gestion des messages d’erreur pour la télécommande
+    // Gestion des messages d’erreur pour la télécommande avec détails
     if (data.error === 'Track already played') {
-      toast('Musique déjà écoutée ❌');
+      const by  = data.by || 'quelqu’un';
+      const mins = data.remainingMinutes != null ? data.remainingMinutes : '';
+      toast(`Musique déjà jouée par ${by}, disponible dans ${mins} min ❌`);
     } else if (data.error === 'Limit per guest reached') {
       toast('Limite de 2 morceaux atteinte ❌');
     } else if (data.error === 'Invalid session key') {
       toast('Session expirée ❌');
     } else {
-      toast('Erreur : ' + data.error);
+      toast('Erreur : ' + data.error);
     }
   }
 };
