@@ -157,6 +157,7 @@
         <select id="playlistSelect" style="padding:8px;border-radius:5px;font-size:16px;"></select>
         <button class="btn" id="launchPlaylistBtn" style="background:#007AFF;">🎵 Lancer la playlist</button>
         <button class="btn" id="newSessionBtn" style="background:#e53935;">🎉 Démarrer une nouvelle soirée</button>
+        <button class="btn" id="endSessionBtn" style="background:#ff9800;">⛔ Terminer la soirée</button>
       </div>
       <p id="errorMsg"></p>
     </div>
@@ -180,8 +181,82 @@
     <ul id="albumList" style="list-style:none;padding:0;margin:0;"></ul>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js">
+  // Ajout confirmation pour nouvelle soirée
+  document.getElementById('newSessionBtn').addEventListener('click', async () => {
+      if (!confirm("Voulez-vous vraiment démarrer une nouvelle soirée ? L’ancienne sera terminée.")) return;
+      let name = window.prompt("Nom de la soirée ?", "");
+      if (name === null) return;
+      name = name.trim();
+      const url = '/reset-session' + (name ? ('?name=' + encodeURIComponent(name)) : '');
+      const r = await fetch(url, { method: 'POST' });
+      if (!r.ok) return;
+      const d = await r.json();
+      sessionKey = d.key;
+      const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+      document.getElementById('qrcode').innerHTML = '';
+      new QRCode(document.getElementById('qrcode'), {
+        text: guestUrl,
+        width: 200,
+        height: 200,
+        colorDark: '#ffffff',
+        colorLight: '#111111',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      updatePriorityQueue();
+      updateAlbumsList();
+  });
+
+  // Nouveau bouton Terminer soirée
+  document.getElementById('endSessionBtn').addEventListener('click', async () => {
+      if (!confirm("Voulez-vous vraiment terminer la soirée actuelle ?")) return;
+      const r = await fetch('/end-session', { method: 'POST' });
+      if (r.ok) {
+        alert("La soirée a été terminée. Les invités verront le message de fin.");
+        document.getElementById('qrcode').innerHTML = '';
+      } else {
+        alert("Erreur lors de la terminaison de la soirée.");
+      }
+  });
+</script>
+  <script src="https://sdk.scdn.co/spotify-player.js">
+  // Ajout confirmation pour nouvelle soirée
+  document.getElementById('newSessionBtn').addEventListener('click', async () => {
+      if (!confirm("Voulez-vous vraiment démarrer une nouvelle soirée ? L’ancienne sera terminée.")) return;
+      let name = window.prompt("Nom de la soirée ?", "");
+      if (name === null) return;
+      name = name.trim();
+      const url = '/reset-session' + (name ? ('?name=' + encodeURIComponent(name)) : '');
+      const r = await fetch(url, { method: 'POST' });
+      if (!r.ok) return;
+      const d = await r.json();
+      sessionKey = d.key;
+      const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+      document.getElementById('qrcode').innerHTML = '';
+      new QRCode(document.getElementById('qrcode'), {
+        text: guestUrl,
+        width: 200,
+        height: 200,
+        colorDark: '#ffffff',
+        colorLight: '#111111',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      updatePriorityQueue();
+      updateAlbumsList();
+  });
+
+  // Nouveau bouton Terminer soirée
+  document.getElementById('endSessionBtn').addEventListener('click', async () => {
+      if (!confirm("Voulez-vous vraiment terminer la soirée actuelle ?")) return;
+      const r = await fetch('/end-session', { method: 'POST' });
+      if (r.ok) {
+        alert("La soirée a été terminée. Les invités verront le message de fin.");
+        document.getElementById('qrcode').innerHTML = '';
+      } else {
+        alert("Erreur lors de la terminaison de la soirée.");
+      }
+  });
+</script>
   <script>
     // Construire l’URL invité avec la clé de session fournie par le serveur.
     // On récupère d’abord la clé, puis on génère le QR code. Cela évite que
@@ -475,6 +550,43 @@
         }catch(e){console.error(e);}
       };
     };
-  </script>
+  
+  // Ajout confirmation pour nouvelle soirée
+  document.getElementById('newSessionBtn').addEventListener('click', async () => {
+      if (!confirm("Voulez-vous vraiment démarrer une nouvelle soirée ? L’ancienne sera terminée.")) return;
+      let name = window.prompt("Nom de la soirée ?", "");
+      if (name === null) return;
+      name = name.trim();
+      const url = '/reset-session' + (name ? ('?name=' + encodeURIComponent(name)) : '');
+      const r = await fetch(url, { method: 'POST' });
+      if (!r.ok) return;
+      const d = await r.json();
+      sessionKey = d.key;
+      const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+      document.getElementById('qrcode').innerHTML = '';
+      new QRCode(document.getElementById('qrcode'), {
+        text: guestUrl,
+        width: 200,
+        height: 200,
+        colorDark: '#ffffff',
+        colorLight: '#111111',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      updatePriorityQueue();
+      updateAlbumsList();
+  });
+
+  // Nouveau bouton Terminer soirée
+  document.getElementById('endSessionBtn').addEventListener('click', async () => {
+      if (!confirm("Voulez-vous vraiment terminer la soirée actuelle ?")) return;
+      const r = await fetch('/end-session', { method: 'POST' });
+      if (r.ok) {
+        alert("La soirée a été terminée. Les invités verront le message de fin.");
+        document.getElementById('qrcode').innerHTML = '';
+      } else {
+        alert("Erreur lors de la terminaison de la soirée.");
+      }
+  });
+</script>
 </body>
 </html>
