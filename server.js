@@ -215,6 +215,15 @@ app.post('/add-priority-track', async (req,res)=>{
 
 app.get('/priority-queue', (_q,res)=>res.json({queue:priorityQueue}));
 
+// Indique si une session est active c’est‑à‑dire si la file d’attente ou
+// l’historique contient déjà des morceaux.  Cela permet au frontend
+// d’avertir l’admin qu’une soirée est en cours et de proposer de la
+// réinitialiser.
+app.get('/session-active', (_req, res) => {
+  const active = (playedTracks.size > 0) || (priorityQueue.length > 0);
+  res.json({ active });
+});
+
 app.get('/next-track', async (_q,res)=>{
   if(priorityQueue.length===0){
     priorityQueue.push(...await fetchRandomTracksFromPlaylist(SOURCE_PLAYLIST,1));
