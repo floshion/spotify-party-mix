@@ -183,7 +183,8 @@ document.getElementById('launchPlaylistBtn').addEventListener('click', async () 
 });
 
 document.getElementById('resetSessionBtn').addEventListener('click', async () => {
-  const r = await fetch('/reset-session', { method: 'POST' });
+  // Démarre une nouvelle soirée en réinitialisant le lecteur Spotify et la file
+  const r = await fetch('/new-session', { method: 'POST' });
   if (!r.ok) return;
   const d = await r.json();
   // Met à jour la clé de session utilisée pour les ajouts depuis la télécommande
