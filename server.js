@@ -287,6 +287,31 @@ app.post('/add-priority-track', async (req,res)=>{
 
 app.get('/priority-queue', (_q,res)=>res.json({queue:priorityQueue}));
 
+// Permet de supprimer un morceau de la file d'attente prioritaire.  La suppression
+// s'effectue sur la première occurrence du titre correspondant à l'URI fournie.
+// Si le morceau est trouvé et supprimé, la file est ensuite complétée avec
+// d'éventuels titres automatiques pour respecter la longueur cible.  La route
+// retourne le morceau supprimé afin que le frontend puisse éventuellement
+// l'utiliser pour des notifications.
+app.post('/remove-priority-track', async (req, res) => {
+  const uri = req.query.uri;
+  if (!uri) {
+    return res.status(400).json({ error: 'No URI' });
+  }
+  // Trouve la première occurrence du morceau dans la file
+  const idx = priorityQueue.findIndex(t => t.uri === uri);
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Track not found' });
+  }
+  const [removed] = priorityQueue.splice(idx, 1);
+  try {
+    await autoFillQueue();
+  } catch (e) {
+    console.error('Erreur lors du remplissage automatique après suppression', e);
+  }
+  return res.json({ message: 'Track removed', track: removed });
+});
+
 // Indique si une session est active c’est‑à‑dire si la file d’attente ou
 // l’historique contient déjà des morceaux.  Cela permet au frontend
 // d’avertir l’admin qu’une soirée est en cours et de proposer de la
