@@ -31,6 +31,15 @@ let priorityQueue = [];                  // [{ uri,name,artists,image,auto }]
 // Example structure: { uri1: { ts: 1690000000000, guest: 'Alice' }, … }
 let playedTracks  = new Map();
 
+// Mise en cache des caractéristiques audio des titres de chaque playlist.
+// La clé est l’ID de la playlist et la valeur est un tableau d’objets
+// contenant : { uri, name, artists, image, tempo, key, mode }.  Cette
+// structure permet de générer des suggestions basées sur le tempo et la
+// tonalité sans dépendre des recommandations Spotify qui peuvent être
+// bloquées.  Les données sont recalculées à chaque changement de
+// playlist via cachePlaylistFeatures().
+const playlistFeatures = {};
+
 // Génère une clé de session aléatoire à chaque démarrage du serveur.
 // Cette clé est utilisée pour créer une URL unique pour la page invité
 // (via le QR code). Les invités doivent fournir cette clé lorsqu’ils
@@ -125,6 +134,61 @@ async function fetchRandomTracksFromPlaylist(id, limit=3){
     });
   }
   return out;
+}
+
+// Met en cache les caractéristiques audio de la playlist spécifiée.  Pour
+// chaque morceau de la playlist (limité à 100), on récupère son tempo,
+// sa tonalité (key) et son mode via l’API audio‑features de Spotify.  Ces
+// informations sont utilisées pour proposer des suggestions basées sur
+// l’enchaînement (BPM, tonalité) plutôt que sur les recommandations Spotify.
+async function cachePlaylistFeatures(playlistId) {
+  try {
+    const h = { Authorization: 'Bearer ' + access_token };
+    let tracks = [];
+    let url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100&fields=items(track(id,uri,name,artists(name),album(images(url)))),next&market=FR`;
+    // Récupère jusqu’à 100 titres de la playlist
+    while (url && tracks.length < 100) {
+      const d = await (await fetch(url, { headers: h })).json();
+      (d.items || []).forEach(item => {
+        const tr = item.track;
+        if (!tr || !tr.id) return;
+        tracks.push({
+          id: tr.id,
+          uri: tr.uri,
+          name: tr.name,
+          artists: tr.artists.map(a => a.name).join(', '),
+          image: tr.album.images?.[0]?.url || ''
+        });
+      });
+      url = d.next;
+      if (!url) break;
+    }
+    if (tracks.length === 0) {
+      playlistFeatures[playlistId] = [];
+      return;
+    }
+    // Découpe en paquets de 100 IDs (API limite 100).
+    const ids = tracks.map(t => t.id).join(',');
+    const featRes = await fetch(`https://api.spotify.com/v1/audio-features?ids=${ids}`, { headers: h });
+    const featJson = await featRes.json();
+    const features = featJson.audio_features || [];
+    const enriched = tracks.map((t, idx) => {
+      const f = features[idx] || {};
+      return {
+        uri: t.uri,
+        name: t.name,
+        artists: t.artists,
+        image: t.image,
+        tempo: f.tempo || 0,
+        key: f.key,
+        mode: f.mode
+      };
+    });
+    playlistFeatures[playlistId] = enriched;
+  } catch (e) {
+    console.error('cachePlaylistFeatures erreur', e);
+    playlistFeatures[playlistId] = [];
+  }
 }
 
 async function autoFillQueue(){
@@ -278,6 +342,8 @@ app.post('/set-playlist', async (req, res) => {
   // remplacés par ceux de la nouvelle playlist via autoFillQueue().
   priorityQueue = priorityQueue.filter(t => !t.auto);
   try {
+    // Met en cache les caractéristiques audio pour permettre des suggestions
+    await cachePlaylistFeatures(id);
     await autoFillQueue();
     res.json({ message: 'Playlist changed', playlist: id });
   } catch (e) {
@@ -296,30 +362,62 @@ app.post('/set-playlist', async (req, res) => {
 app.get('/recommendations', async (_req, res) => {
   try {
     // Récupère le morceau actuellement en lecture sur le compte Spotify
-    const now = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+    const nowRes = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
       headers: { Authorization: 'Bearer ' + access_token }
     });
-    if (!now.ok) {
+    if (!nowRes.ok) {
       return res.json({ tracks: [] });
     }
-    const json = await now.json();
-    if (!json || !json.item) {
+    const nowJson = await nowRes.json();
+    if (!nowJson || !nowJson.item) {
       return res.json({ tracks: [] });
     }
-    const seedId = json.item.id;
-    // Utilise l’endpoint recommendations de Spotify pour récupérer des titres
-    // similaires.  On passe le morceau en seed, limite 4, marché FR.
-    const rec = await fetch(`https://api.spotify.com/v1/recommendations?seed_tracks=${seedId}&limit=4&market=FR`, {
+    const seedId = nowJson.item.id;
+    // Récupère les caractéristiques audio (tempo, key, mode) du morceau en cours
+    const featRes = await fetch(`https://api.spotify.com/v1/audio-features/${seedId}`, {
       headers: { Authorization: 'Bearer ' + access_token }
     });
-    const recJson = await rec.json();
-    const tracks = (recJson.tracks || []).map(t => ({
-      uri:    t.uri,
-      name:   t.name,
-      artists: t.artists.map(a => a.name).join(', '),
-      image:  t.album.images?.[0]?.url || ''
+    if (!featRes.ok) {
+      return res.json({ tracks: [] });
+    }
+    const featJson = await featRes.json();
+    const currentTempo = featJson.tempo || 0;
+    const currentKey   = featJson.key;
+    const currentMode  = featJson.mode;
+    const features = playlistFeatures[SOURCE_PLAYLIST] || [];
+    if (!features.length) {
+      return res.json({ tracks: [] });
+    }
+    // Sélectionne des candidats qui ne sont pas déjà le morceau en cours et
+    // qui ne sont pas bloqués (joués récemment).  On filtre également les
+    // titres encore présents dans la file d’attente pour éviter les doublons.
+    const candidates = features.filter(item => {
+      const id = item.uri.split(':').pop();
+      if (id === seedId) return false;
+      // ignore les morceaux déjà lus et encore bloqués
+      const playedInfo = playedTracks.get(item.uri);
+      if (playedInfo && (Date.now() - playedInfo.ts) < 2 * 60 * 60 * 1000) return false;
+      // ignore les morceaux déjà dans la file d’attente
+      if (priorityQueue.some(t => t.uri === item.uri)) return false;
+      return true;
+    });
+    // Calcule une distance simple basée sur la différence de tempo et le
+    // changement de tonalité/mode.  Un changement de tonalité ou de mode est
+    // pénalisé afin de favoriser les enchaînements harmonieux.
+    function distance(item) {
+      const tempoDiff = Math.abs((item.tempo || 0) - currentTempo);
+      const keyPenalty  = (item.key === currentKey) ? 0 : 50;
+      const modePenalty = (item.mode === currentMode) ? 0 : 25;
+      return tempoDiff + keyPenalty + modePenalty;
+    }
+    candidates.sort((a, b) => distance(a) - distance(b));
+    const selected = candidates.slice(0, 4).map(t => ({
+      uri: t.uri,
+      name: t.name,
+      artists: t.artists,
+      image: t.image
     }));
-    res.json({ tracks });
+    res.json({ tracks: selected });
   } catch (err) {
     console.error('Erreur lors de la récupération des recommandations', err);
     res.status(500).json({ error: 'Failed to get recommendations' });
