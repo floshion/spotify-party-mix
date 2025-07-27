@@ -173,6 +173,12 @@
       </div>
     </div>
   </div>
+  <!-- Section Album / Photos -->
+  <div id="albumSection" style="width:95%;max-width:1200px;margin-top:30px;background:#222;padding:15px;border-radius:10px;display:none;flex-direction:column;gap:10px;">
+    <h3 style="margin:0 0 10px;color:#fff;font-size:24px;">Albums photos</h3>
+    <p style="margin:0 0 10px;color:#aaa;font-size:14px;">Téléchargez ou supprimez les souvenirs des soirées passées.</p>
+    <ul id="albumList" style="list-style:none;padding:0;margin:0;"></ul>
+  </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
@@ -232,18 +238,32 @@
       updatePriorityQueue();
     });
     document.getElementById('newSessionBtn').addEventListener('click', async () => {
-      const r = await fetch('/reset-session', { method: 'POST' });
+      // Demande à l’admin de nommer la soirée.  Si l’utilisateur annule,
+      // on ignore l’action.  Le nom est ensuite envoyé en paramètre à
+      // /reset-session pour que le serveur crée le dossier correspondant.
+      let name = window.prompt("Nom de la soirée ?", "");
+      if (name === null) return; // action annulée
+      name = name.trim();
+      // Envoie la requête de réinitialisation avec le nom fourni
+      const url = '/reset-session' + (name ? ('?name=' + encodeURIComponent(name)) : '');
+      const r = await fetch(url, { method: 'POST' });
       if (!r.ok) return;
       const d = await r.json();
       sessionKey = d.key;
-      // Génère un nouveau QR code avec la nouvelle clé
+      // Met à jour le QR code avec la nouvelle clé
       const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
       document.getElementById('qrcode').innerHTML = '';
-      new QRCode(document.getElementById('qrcode'),
-        { text: guestUrl, width: 200, height: 200,
-          colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
-      // Met à jour la file d’attente pour refléter la nouvelle session
+      new QRCode(document.getElementById('qrcode'), {
+        text: guestUrl,
+        width: 200,
+        height: 200,
+        colorDark: '#ffffff',
+        colorLight: '#111111',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      // Met à jour la file d’attente et la liste des albums
       updatePriorityQueue();
+      updateAlbumsList();
     });
 
     // Au chargement de la page, vérifie s’il existe déjà une soirée en cours
@@ -273,6 +293,8 @@
       } catch (e) {
         console.warn('Impossible de vérifier l’état de la session', e);
       }
+      // Met à jour la liste des albums au chargement de la page
+      updateAlbumsList();
     });
 
     async function getToken(){
@@ -304,6 +326,75 @@
       });
     }
     setInterval(updatePriorityQueue,5000);
+
+    // Met à jour la liste des albums (photos) disponibles.  Cette
+    // fonction récupère la liste via l’endpoint /albums et construit
+    // dynamiquement les éléments de la liste avec un lien de téléchargement
+    // et un bouton de suppression.  Si aucun album n’existe, la section
+    // dédiée est masquée.
+    async function updateAlbumsList() {
+      try {
+        const res = await fetch('/albums');
+        const data = await res.json();
+        const section = document.getElementById('albumSection');
+        const list    = document.getElementById('albumList');
+        list.innerHTML = '';
+        const albums = data.albums || [];
+        if (albums.length === 0) {
+          section.style.display = 'none';
+          return;
+        }
+        section.style.display = 'flex';
+        albums.forEach(alb => {
+          const li = document.createElement('li');
+          li.style.display = 'flex';
+          li.style.alignItems = 'center';
+          li.style.justifyContent = 'space-between';
+          li.style.padding = '8px 0';
+          li.style.borderBottom = '1px solid #333';
+          const left = document.createElement('div');
+          left.style.color = '#fff';
+          const display = alb.display || alb.name;
+          left.textContent = `${display} (${alb.count} photo${alb.count > 1 ? 's' : ''})`;
+          const right = document.createElement('div');
+          right.style.display = 'flex';
+          right.style.gap = '10px';
+          // Bouton de téléchargement
+          const download = document.createElement('a');
+          download.href = `/album/${encodeURIComponent(alb.name)}/zip`;
+          download.textContent = '⬇️';
+          download.title = 'Télécharger';
+          download.style.textDecoration = 'none';
+          download.style.fontSize = '20px';
+          download.style.color = '#1DB954';
+          // Bouton de suppression
+          const del = document.createElement('button');
+          del.textContent = '🗑️';
+          del.title = 'Supprimer';
+          del.style.background = 'transparent';
+          del.style.border = 'none';
+          del.style.cursor = 'pointer';
+          del.style.fontSize = '20px';
+          del.style.color = '#e53935';
+          del.addEventListener('click', async () => {
+            if (!confirm(`Supprimer l’album « ${alb.name} » ?`)) return;
+            const resp = await fetch(`/album/${encodeURIComponent(alb.name)}`, { method: 'DELETE' });
+            if (resp.ok) {
+              updateAlbumsList();
+            } else {
+              alert('Échec de la suppression');
+            }
+          });
+          right.appendChild(download);
+          right.appendChild(del);
+          li.appendChild(left);
+          li.appendChild(right);
+          list.appendChild(li);
+        });
+      } catch (e) {
+        console.warn('Erreur lors de la mise à jour des albums', e);
+      }
+    }
 
     function formatTime(ms){
       const m = Math.floor(ms/60000);

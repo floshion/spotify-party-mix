@@ -162,6 +162,11 @@
         <span id="currentTime">0:00</span>
         <span id="totalTime">0:00</span>
       </div>
+      <!-- Slideshow des photos prises durant la soirée -->
+      <div id="photoContainer" style="margin-top:30px;text-align:center;">
+        <img id="photoView" src="" alt="Photos" style="width:100%;max-width:500px;border-radius:15px;box-shadow:0 0 15px rgba(0,0,0,0.8);display:none;" />
+        <p id="photoCaption" style="color:#aaa;font-size:18px;margin-top:8px;display:none;">Photos en cours…</p>
+      </div>
     </div>
 
     <!-- File d'attente -->
@@ -256,6 +261,50 @@
     setInterval(updatePriorityQueue, 5000);
     updateNowPlaying();
     updatePriorityQueue();
+
+    /* ---------------------------------------------------------------
+     * Slideshow des photos
+     *
+     * Cette partie gère la récupération périodique des photos de la
+     * soirée et l’affichage en boucle dans la zone réservée.  Toutes les
+     * cinq secondes, le client interroge le serveur pour obtenir la
+     * liste des clichés via /photos-list.  Si des photos existent, on
+     * affiche l’image courante et on passe à la suivante à chaque
+     * rafraîchissement.  Les paramètres d’URL (?t=timestamp) servent à
+     * contourner le cache du navigateur et afficher les nouvelles
+     * photos immédiatement.
+     */
+    let photoList = [];
+    let photoIndex = 0;
+    async function refreshPhotos() {
+      try {
+        const res = await fetch('/photos-list');
+        const data = await res.json();
+        photoList = data.photos || [];
+        const imgEl    = document.getElementById('photoView');
+        const caption  = document.getElementById('photoCaption');
+        if (!imgEl || !caption) return;
+        if (photoList.length === 0) {
+          imgEl.style.display = 'none';
+          caption.style.display = 'none';
+          return;
+        }
+        imgEl.style.display = '';
+        caption.style.display = '';
+        caption.textContent = `${photoList.length} photo${photoList.length > 1 ? 's' : ''}`;
+        // Affiche la photo courante
+        const idx = photoIndex % photoList.length;
+        const url = photoList[idx] + '?t=' + Date.now();
+        imgEl.src = url;
+        photoIndex++;
+      } catch (e) {
+        console.warn('Erreur lors du chargement des photos', e);
+      }
+    }
+    // Met à jour les photos toutes les 5 secondes
+    setInterval(refreshPhotos, 5000);
+    // Premier chargement immédiat
+    refreshPhotos();
   </script>
 </body>
 </html>

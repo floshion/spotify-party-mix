@@ -182,6 +182,11 @@
     <div id="queueList"></div>
   </div>
 
+  <!-- Bouton pour prendre une photo -->
+  <div style="padding:15px; text-align:center;">
+    <button id="photoBtn" style="background:#1DB954;border:none;color:#fff;padding:12px 20px;border-radius:25px;font-size:18px;cursor:pointer;">📸 Prendre une photo</button>
+  </div>
+
     <!-- Modal Recherche -->
   <div class="modal" id="searchModal">
     <button class="close-btn" id="closeModal">&times;</button>
@@ -514,6 +519,51 @@
     setInterval(updateQueue, 5000);
     updateNowPlaying();
     updateQueue();
+
+    /* ---------------------------------------------------------------
+     * Capture et envoi de photos
+     *
+     * Un bouton « 📸 Prendre une photo » permet aux invités d’ouvrir
+     * l’appareil photo de leur smartphone (via l’input file en mode
+     * capture).  Une fois la photo sélectionnée ou prise, elle est
+     * convertie en base64 et envoyée au serveur via /upload-photo.
+     */
+    (function(){
+      const btn = document.getElementById('photoBtn');
+      if (!btn) return;
+      // Création d’un input caché pour déclencher l’appareil photo
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      // capture=environment suggère de lancer la caméra arrière sur mobile
+      fileInput.setAttribute('capture', 'environment');
+      fileInput.style.display = 'none';
+      document.body.appendChild(fileInput);
+      btn.addEventListener('click', () => {
+        fileInput.value = '';
+        fileInput.click();
+      });
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async function() {
+          const dataUrl = reader.result;
+          try {
+            await fetch('/upload-photo', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: dataUrl, key: sessionKey })
+            });
+            showToast('Photo envoyée !');
+          } catch (e) {
+            console.warn('Erreur envoi photo', e);
+            showToast('Erreur lors de l’envoi');
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    })();
   </script>
 </body>
 </html>
