@@ -176,6 +176,35 @@
       updatePriorityQueue();
     });
 
+    // Au chargement de la page, vérifie s’il existe déjà une soirée en cours
+    // (musiques jouées ou file d’attente non vide).  Si c’est le cas, propose
+    // à l’admin de réinitialiser la soirée.  Cela permet de relancer le site
+    // sans perdre la file d’attente en pleine soirée, tout en rappelant de
+    // remettre à zéro au début d’une nouvelle soirée.
+    window.addEventListener('load', async () => {
+      try {
+        const res = await fetch('/session-active');
+        const info = await res.json();
+        if (info.active) {
+          const doit = window.confirm('Une session est déjà en cours. Souhaitez‑vous démarrer une nouvelle soirée ?');
+          if (doit) {
+            const r = await fetch('/reset-session', { method: 'POST' });
+            if (r.ok) {
+              const d = await r.json();
+              sessionKey = d.key;
+              const guestUrl = window.location.origin + '/guest.html?key=' + encodeURIComponent(sessionKey);
+              document.getElementById('qrcode').innerHTML = '';
+              new QRCode(document.getElementById('qrcode'), { text: guestUrl, width: 200, height: 200,
+                colorDark:'#ffffff', colorLight:'#111111', correctLevel:QRCode.CorrectLevel.H });
+              updatePriorityQueue();
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Impossible de vérifier l’état de la session', e);
+      }
+    });
+
     async function getToken(){
       const res = await fetch('/token');
       const data = await res.json();

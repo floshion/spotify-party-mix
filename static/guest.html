@@ -306,11 +306,12 @@
     if (!res.ok || data.error) {
       // Gestion détaillée des erreurs.
       if (data.error === 'Track already played') {
-        const by   = data.by || 'quelqu’un';
+        let who  = data.by || 'quelqu’un';
+        if (who === 'Auto' || who === '') who = 'la playlist';
         const mins = data.remainingMinutes != null ? data.remainingMinutes : '';
         const playedAt = data.playedAt ? new Date(data.playedAt) : null;
         const heure = playedAt ? playedAt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
-        showInfoModal(`Cette musique a déjà été jouée à ${heure} par ${by}. Vous pourrez la jouer à nouveau dans ${mins} minute${mins>1?'s':''}.`);
+        showInfoModal(`Cette musique a déjà été jouée à ${heure} par ${who}. Vous pourrez la jouer à nouveau dans ${mins} minute${mins>1?'s':''}.`);
       } else if (data.error === 'Limit per guest reached') {
         showToast("Tu as déjà ajouté 2 morceaux d’affilée !");
       } else if (data.error === 'Invalid session key') {
