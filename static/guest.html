@@ -50,6 +50,44 @@
     .result div { flex: 1; }
     .result strong { font-size: 16px; display: block; }
     .result span { font-size: 14px; color: #aaa; }
+
+    /* Suggestions de titre en haut du modal de recherche */
+    #suggestionsContainer {
+      margin-bottom: 10px;
+    }
+    .suggestion-header {
+      font-size: 14px;
+      color: #1DB954;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+    .suggestion-item {
+      display: flex;
+      align-items: center;
+      background: #1c1c1e;
+      padding: 12px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .suggestion-item:hover {
+      background: #2c2c2e;
+    }
+    .suggestion-item img {
+      width: 50px;
+      height: 50px;
+      border-radius: 8px;
+      margin-right: 12px;
+    }
+    .suggestion-item strong {
+      font-size: 16px;
+      display: block;
+    }
+    .suggestion-item span {
+      font-size: 14px;
+      color: #aaa;
+    }
     .close-btn { background: none; border: none; color: #fff; font-size: 20px; position: absolute; right: 15px; top: 15px; cursor: pointer; }
 
     /* Toast */
@@ -144,12 +182,14 @@
     <div id="queueList"></div>
   </div>
 
-  <!-- Modal Recherche -->
+    <!-- Modal Recherche -->
   <div class="modal" id="searchModal">
     <button class="close-btn" id="closeModal">&times;</button>
     <div class="modal-header">
       <input type="text" id="searchInput" placeholder="Rechercher un titre..." autofocus />
     </div>
+    <!-- Conteneur des suggestions qui apparaissent avant les résultats de recherche -->
+    <div class="modal-results" id="suggestionsContainer" style="display:none;"></div>
     <div class="modal-results" id="results"></div>
   </div>
 
@@ -326,12 +366,6 @@
     closeModal();
 }
 
-    function openModal() {
-      const modal = document.getElementById("searchModal");
-      document.getElementById("searchInput").value = "";
-      document.getElementById("results").innerHTML = "";
-      modal.classList.add("show");
-    }
 
     function closeModal() {
       const modal = document.getElementById("searchModal");
@@ -363,6 +397,50 @@
         resultsDiv.appendChild(div);
       });
     });
+
+    // Charge les suggestions basées sur le morceau en cours et les affiche au
+    // sommet du modal de recherche.  Les suggestions ne dépendent pas de la
+    // recherche de l’utilisateur et sont mises à jour à chaque ouverture du
+    // modal.
+    async function loadSuggestions() {
+      try {
+        const res  = await fetch('/recommendations');
+        const data = await res.json();
+        const container = document.getElementById('suggestionsContainer');
+        // Vide et cache le conteneur par défaut
+        container.innerHTML = '';
+        container.style.display = 'none';
+        if (!data.tracks || data.tracks.length === 0) return;
+        // Ajoute un en‑tête pour distinguer les suggestions des résultats
+        const header = document.createElement('div');
+        header.className = 'suggestion-header';
+        header.textContent = 'Suggestions adaptées au morceau en cours :';
+        container.appendChild(header);
+        data.tracks.forEach(t => {
+          const div = document.createElement('div');
+          div.className = 'suggestion-item';
+          div.innerHTML = `<img src="${t.image}" /><div><strong>${t.name}</strong><span>${t.artists}</span></div>`;
+          div.onclick = () => addTrackToPriority(t.uri);
+          container.appendChild(div);
+        });
+        container.style.display = 'block';
+      } catch (e) {
+        console.warn('Impossible de charger les suggestions', e);
+      }
+    }
+
+    // Lorsque le modal est ouvert, charge les suggestions
+    function openModal() {
+      const modal = document.getElementById("searchModal");
+      document.getElementById("searchInput").value = "";
+      document.getElementById("results").innerHTML = "";
+      // Nettoie les suggestions avant de les charger à nouveau
+      const sugg = document.getElementById('suggestionsContainer');
+      sugg.innerHTML = '';
+      sugg.style.display = 'none';
+      loadSuggestions();
+      modal.classList.add("show");
+    }
 
     function showToast(message) {
       const toast = document.getElementById('toast');
