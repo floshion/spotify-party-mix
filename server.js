@@ -67,6 +67,14 @@ async function refreshAccessToken () {
 await refreshAccessToken();
 setInterval(refreshAccessToken, 50*60*1000);
 
+// Précharge les caractéristiques audio de la playlist source au démarrage
+// afin de permettre des suggestions dès la première ouverture.  Sans cet
+// appel, playlistFeatures[SOURCE_PLAYLIST] resterait vide jusqu’à ce que
+// l’utilisateur change manuellement de playlist via l’interface.
+cachePlaylistFeatures(SOURCE_PLAYLIST).catch(e => {
+  console.warn('Impossible de précharger les caractéristiques de la playlist', e);
+});
+
 /* ---------- Session Key --------------------------------------------------------- */
 // Renvoie la clé de session actuelle. Le frontend récupère cette clé
 // pour générer une URL de participation unique dans le QR code. Sans cette clé,
