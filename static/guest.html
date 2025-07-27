@@ -410,23 +410,10 @@
         const container = document.getElementById('suggestionsContainer');
         container.innerHTML = '';
         container.style.display = 'none';
-        const token = await getToken();
-        // Récupère le morceau actuellement en cours via l’API Spotify
-        const now = await fetchCurrentTrack(token);
-        if (!now || !now.item) return;
-        const seedId = now.item.id;
-        // Demande des recommandations directement à l’API Spotify
-        const recRes = await fetch(`https://api.spotify.com/v1/recommendations?seed_tracks=${seedId}&limit=4&market=FR`, {
-          headers: { Authorization: 'Bearer ' + token }
-        });
-        if (!recRes.ok) return;
-        const recJson = await recRes.json();
-        const tracks = (recJson.tracks || []).map(t => ({
-          uri: t.uri,
-          name: t.name,
-          artists: t.artists.map(a => a.name).join(', '),
-          image: t.album.images?.[0]?.url || ''
-        }));
+        const resp = await fetch('/recommendations');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const tracks = data.tracks || [];
         if (!tracks.length) return;
         const header = document.createElement('div');
         header.className = 'suggestion-header';
