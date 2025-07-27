@@ -152,7 +152,8 @@ app.post('/add-priority-track', async (req,res)=>{
       return res.status(400).json({
         error: 'Track already played',
         by: playedInfo.guest,
-        remainingMinutes: remainingMin
+        remainingMinutes: remainingMin,
+        playedAt: playedInfo.ts
       });
     }
     // Si expiré, supprime l’entrée pour permettre la ré‑ajout
