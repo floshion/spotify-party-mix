@@ -78,6 +78,22 @@
 </div>
 <div id="toast"></div>
 
+<!-- Modal info pour les messages détaillés (ex : morceau déjà joué) -->
+<div id="infoModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:none;align-items:center;justify-content:center;z-index:5000;">
+  <div style="background:#1c1c1e;padding:20px 25px;border-radius:15px;max-width:90%;text-align:center;">
+    <p id="infoMessage" style="margin-bottom:20px;font-size:18px;line-height:1.4;"></p>
+    <button id="infoOkBtn" style="background:#1DB954;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:16px;cursor:pointer;">OK</button>
+  </div>
+</div>
+
+<!-- Contrôles admin pour choisir la playlist et démarrer une nouvelle soirée -->
+<div class="admin-controls" style="padding:15px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+  <label style="font-size:14px;color:#fff;">Choisir une playlist :</label>
+  <select id="playlistSelect" style="padding:6px;border-radius:4px;font-size:14px;"></select>
+  <button class="btn" id="launchPlaylistBtn" style="background:#007AFF;">Lancer la playlist</button>
+  <button class="btn" id="resetSessionBtn" style="background:#e53935;">Nouvelle soirée</button>
+</div>
+
 <!-- Modal recherche -->
 <div class="modal" id="searchM">
   <button class="close" id="closeM">&times;</button>
@@ -106,6 +122,75 @@ const searchM = document.getElementById('searchM');
 const closeM  = document.getElementById('closeM');
 const searchI = document.getElementById('searchI');
 const results = document.getElementById('results');
+
+/* -------- Info Modal utils -------- */
+function showInfoModal(message) {
+  const modal = document.getElementById('infoModal');
+  const msgEl = document.getElementById('infoMessage');
+  msgEl.textContent = message;
+  modal.style.display = 'flex';
+}
+function hideInfoModal() {
+  document.getElementById('infoModal').style.display = 'none';
+}
+document.getElementById('infoOkBtn')?.addEventListener('click', hideInfoModal);
+
+/* -------- Playlist management -------- */
+async function loadPlaylists() {
+  try {
+    const res  = await fetch('/playlists');
+    const data = await res.json();
+    const sel  = document.getElementById('playlistSelect');
+    sel.innerHTML = '';
+    (data.playlists || []).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Impossible de charger les playlists', e);
+  }
+}
+loadPlaylists();
+
+document.getElementById('launchPlaylistBtn').addEventListener('click', async () => {
+  const sel = document.getElementById('playlistSelect');
+  const id = sel.value;
+  if (!id) return;
+  // Change la playlist côté serveur
+  await fetch('/set-playlist?id=' + encodeURIComponent(id), { method: 'POST' });
+  // Détermine s’il faut démarrer immédiatement : on interroge l’état courant
+  let needStart = false;
+  try {
+    const tok = await getToken();
+    const r   = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { Authorization: 'Bearer ' + tok } });
+    if (!r.ok) {
+      needStart = true;
+    } else {
+      const d = await r.json();
+      // Si rien n’est en cours ou si la lecture est en pause, on démarre
+      if (!d || !d.is_playing) needStart = true;
+    }
+  } catch (e) {
+    needStart = true;
+  }
+  if (needStart) {
+    // Lance le prochain titre (sera de la nouvelle playlist)
+    await fetch('/skip', { method: 'POST' });
+  }
+  queue();
+});
+
+document.getElementById('resetSessionBtn').addEventListener('click', async () => {
+  const r = await fetch('/reset-session', { method: 'POST' });
+  if (!r.ok) return;
+  const d = await r.json();
+  // Met à jour la clé de session utilisée pour les ajouts depuis la télécommande
+  sessionKeyRemote = d.key;
+  toast('Nouvelle soirée démarrée');
+  queue();
+});
 
 /* -------- Utils -------- */
 // Récupère la clé de session unique pour cette soirée et fixe le nom
@@ -203,9 +288,11 @@ results.onclick = async e=>{
   } else {
     // Gestion des messages d’erreur pour la télécommande avec détails
     if (data.error === 'Track already played') {
-      const by  = data.by || 'quelqu’un';
+      const by   = data.by || 'quelqu’un';
       const mins = data.remainingMinutes != null ? data.remainingMinutes : '';
-      toast(`Musique déjà jouée par ${by}, disponible dans ${mins} min ❌`);
+      const playedAt = data.playedAt ? new Date(data.playedAt) : null;
+      const heure = playedAt ? playedAt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+      showInfoModal(`Cette musique a déjà été jouée à ${heure} par ${by}. Vous pourrez la jouer à nouveau dans ${mins} minute${mins>1?'s':''}.`);
     } else if (data.error === 'Limit per guest reached') {
       toast('Limite de 2 morceaux atteinte ❌');
     } else if (data.error === 'Invalid session key') {

@@ -85,6 +85,7 @@
       <div id="adminControls" style="margin-top:15px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px;">
         <label style="font-size:14px;color:#aaa;">Choisir une playlist :</label>
         <select id="playlistSelect" style="padding:8px;border-radius:5px;font-size:16px;"></select>
+        <button class="btn" id="launchPlaylistBtn" style="background:#007AFF;">🎵 Lancer la playlist</button>
         <button class="btn" id="newSessionBtn" style="background:#e53935;">🎉 Démarrer une nouvelle soirée</button>
       </div>
       <p id="errorMsg"></p>
@@ -140,10 +141,24 @@
       }
     }
     loadPlaylists();
-    document.getElementById('playlistSelect').addEventListener('change', async function() {
-      const id = this.value;
+    // La sélection de la playlist ne déclenche plus automatiquement de
+    // changement de playlist ; l’admin doit cliquer sur « Lancer la playlist ».
+    document.getElementById('launchPlaylistBtn').addEventListener('click', async () => {
+      const sel = document.getElementById('playlistSelect');
+      const id  = sel.value;
       if (!id) return;
       await fetch('/set-playlist?id=' + encodeURIComponent(id), { method: 'POST' });
+      // Détermine s’il faut démarrer immédiatement : si aucun morceau n’est en cours
+      // ou si la lecture est en pause, on lance le prochain titre de la nouvelle playlist.
+      try {
+        let state = null;
+        if (player) { state = await player.getCurrentState(); }
+        if (!state || state.paused) {
+          await playNextInOrder();
+        }
+      } catch (e) {
+        console.warn('Erreur lors du démarrage de la playlist', e);
+      }
       updatePriorityQueue();
     });
     document.getElementById('newSessionBtn').addEventListener('click', async () => {
