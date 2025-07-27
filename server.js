@@ -16,18 +16,30 @@ const redirect_uri  = process.env.REDIRECT_URI || 'http://localhost:3000/callbac
 let   access_token  = null;
 let   refresh_token = process.env.SPOTIFY_REFRESH_TOKEN || null;
 
-const SOURCE_PLAYLIST     = '1g39kHQqy4XHxGGftDiUWb';
+// Playlist source used to auto‑fill the queue.  This value is mutable and can
+// be set via the /set-playlist route.  It defaults to Florent’s party mix
+// playlist.
+let SOURCE_PLAYLIST     = '1g39kHQqy4XHxGGftDiUWb';
 const TARGET_QUEUE_LENGTH = 6;
 
 let priorityQueue = [];                  // [{ uri,name,artists,image,auto }]
-let playedTracks  = new Set();
+// Instead of a plain Set, maintain a map of played track URIs to an object
+// containing the timestamp of when the track finished playing and the name
+// of the guest who queued it.  This allows us to expire a track after a
+// configurable period (two hours) and to display who played it when
+// rejecting a new request.
+// Example structure: { uri1: { ts: 1690000000000, guest: 'Alice' }, … }
+let playedTracks  = new Map();
 
 // Génère une clé de session aléatoire à chaque démarrage du serveur.
 // Cette clé est utilisée pour créer une URL unique pour la page invité
 // (via le QR code). Les invités doivent fournir cette clé lorsqu’ils
 // ajoutent un morceau, empêchant ainsi les personnes ayant un ancien lien
 // de continuer à interagir avec la playlist.
-const sessionKey = crypto.randomBytes(4).toString('hex');
+// La clé de session détermine l’URL d’invitation utilisée par les invités.  Elle
+// est générée à chaque démarrage, mais peut aussi être régénérée via
+// l’endpoint /reset-session pour démarrer une nouvelle soirée.
+let sessionKey = crypto.randomBytes(4).toString('hex');
 
 /* ---------- Auth ---------------------------------------------------------------- */
 async function refreshAccessToken () {
@@ -55,10 +67,32 @@ app.get('/session-key', (_req, res) => {
 });
 
 /* ---------- Utils ---------------------------------------------------------------- */
-function purgeQueue(){ priorityQueue = priorityQueue.filter(t=>!playedTracks.has(t.uri)); }
+// Remove from the priority queue any track that is still considered “played”
+// (i.e. its two‑hour cooldown hasn’t expired).  If the cooldown has
+// expired, remove the entry from the playedTracks map so that the track
+// becomes eligible again.
+function purgeQueue(){
+  const now = Date.now();
+  priorityQueue = priorityQueue.filter(t => {
+    const info = playedTracks.get(t.uri);
+    // If the track has not been played or has expired, keep it in the queue
+    if (!info) return true;
+    if ((now - info.ts) >= 2 * 60 * 60 * 1000) {
+      // Remove expired played entry
+      playedTracks.delete(t.uri);
+      return true;
+    }
+    // Otherwise it’s still blocked: drop from queue
+    return false;
+  });
+}
 function deduplicateQueue(){
   const seen=new Set();
-  priorityQueue = priorityQueue.filter(t=>{ if(seen.has(t.uri)) return false; seen.add(t.uri); return true;});
+  priorityQueue = priorityQueue.filter(t=>{
+    if (seen.has(t.uri)) return false;
+    seen.add(t.uri);
+    return true;
+  });
 }
 
 async function fetchRandomTracksFromPlaylist(id, limit=3){
@@ -76,7 +110,9 @@ async function fetchRandomTracksFromPlaylist(id, limit=3){
       `https://api.spotify.com/v1/playlists/${id}/tracks?limit=1&offset=${offset}&market=FR`,{headers:h})
     ).json()).items?.[0];
     if(!item?.track) continue;
-    if(playedTracks.has(item.track.uri)) continue;
+    // Skip tracks that are still blocked from a previous play
+    const info = playedTracks.get(item.track.uri);
+    if (info && (Date.now() - info.ts) < 2 * 60 * 60 * 1000) continue;
     out.push({
       uri:    item.track.uri,
       name:   item.track.name,
@@ -107,8 +143,21 @@ app.get('/token', (_q,res)=>res.json({access_token}));
 app.post('/add-priority-track', async (req,res)=>{
   const uri = req.query.uri;
   if (!uri) return res.status(400).json({ error: 'No URI' });
-  // Refuse si le morceau a déjà été joué lors de cette session
-  if (playedTracks.has(uri)) return res.status(400).json({ error:'Track already played' });
+  // Refuse si le morceau a déjà été joué et que son délai de blocage de 2h n’est pas expiré
+  const playedInfo = playedTracks.get(uri);
+  if (playedInfo) {
+    const elapsed = Date.now() - playedInfo.ts;
+    if (elapsed < 2 * 60 * 60 * 1000) {
+      const remainingMin = Math.ceil((2 * 60 * 60 * 1000 - elapsed) / 60000);
+      return res.status(400).json({
+        error: 'Track already played',
+        by: playedInfo.guest,
+        remainingMinutes: remainingMin
+      });
+    }
+    // Si expiré, supprime l’entrée pour permettre la ré‑ajout
+    playedTracks.delete(uri);
+  }
 
   // Vérifie que la clé de session envoyée par l’invité correspond bien
   const providedKey = req.query.key;
@@ -171,9 +220,70 @@ app.get('/next-track', async (_q,res)=>{
   }
   const next = priorityQueue.shift();
   if(!next) return res.status(400).json({error:'No track'});
-  playedTracks.add(next.uri);
+  // Marque le morceau comme joué avec un horodatage et le nom de l’invité
+  playedTracks.set(next.uri, { ts: Date.now(), guest: next.guest || next.guestName || '' });
   await autoFillQueue();
   res.json({track:next});
+});
+
+/* ---------- Playlists & Session management --------------------------------------- */
+
+// Liste les playlists de l’utilisateur connecté (admin) afin de permettre
+// au DJ de choisir la source de la playlist automatique.  Retourne un tableau
+// d’objets avec id, name et éventuellement image.
+app.get('/playlists', async (_req, res) => {
+  try {
+    const h = { Authorization: 'Bearer ' + access_token };
+    // Récupère les playlists de l’utilisateur (jusqu’à 50 pour éviter de
+    // multiplier les requêtes).  On ne gère pas ici la pagination car
+    // l’interface est destinée à un usage personnel.
+    const d = await (await fetch('https://api.spotify.com/v1/me/playlists?limit=50', { headers: h })).json();
+    const lists = (d.items || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      image: p.images?.[0]?.url || ''
+    }));
+    res.json({ playlists: lists });
+  } catch (e) {
+    console.error('Failed to fetch playlists', e);
+    res.status(500).json({ error: 'Unable to fetch playlists' });
+  }
+});
+
+// Change la playlist utilisée pour l’auto‑remplissage.  La nouvelle ID est
+// fournie via le paramètre de requête “id”.  Lorsque la playlist est changée,
+// on purge la file d’attente, on efface les morceaux joués et on remplit
+// automatiquement la file avec le nouvel ensemble de morceaux.
+app.post('/set-playlist', async (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'Missing id' });
+  SOURCE_PLAYLIST = id;
+  // Réinitialise l’état interne
+  priorityQueue = [];
+  playedTracks  = new Map();
+  try {
+    await autoFillQueue();
+    res.json({ message: 'Playlist changed', playlist: id });
+  } catch (e) {
+    console.error('Erreur lors du changement de playlist', e);
+    res.status(500).json({ error: 'Failed to change playlist' });
+  }
+});
+
+// Démarre une nouvelle soirée.  Génère une nouvelle sessionKey, vide la
+// file d’attente et la liste des morceaux joués, puis remplit la file avec
+// des titres de la playlist courante.  Retourne la nouvelle clé.
+app.post('/reset-session', async (_req, res) => {
+  sessionKey    = crypto.randomBytes(4).toString('hex');
+  priorityQueue = [];
+  playedTracks  = new Map();
+  try {
+    await autoFillQueue();
+    res.json({ message: 'Session reset', key: sessionKey });
+  } catch (e) {
+    console.error('Erreur lors de la réinitialisation de session', e);
+    res.status(500).json({ error: 'Failed to reset session' });
+  }
 });
 
 /* ---------- Télécommande --------------------------------------------------------- */
