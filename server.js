@@ -4,11 +4,57 @@ import dotenv  from 'dotenv';
 import path    from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import fs from 'fs/promises';
+
+/* ------------------------------------------------------------------------
+ * Ajout du support JSON volumineux et gestion des photos
+ *
+ * L'application originale gérait uniquement les requêtes Spotify et les
+ * interactions de la file d'attente. Pour permettre aux invités de
+ * partager des photos pendant la soirée, nous activons d'abord le
+ * parseur JSON intégré d'Express afin de recevoir des objets contenant
+ * des données base64. La limite est volontairement élevée (20 MB) pour
+ * autoriser l’envoi de clichés issus des appareils modernes.
+ */
 
 dotenv.config();
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// Active l’analyse JSON pour accepter des payload volumineux (images en base64).
+app.use(express.json({ limit: '20mb' }));
+
+/* ------------------------------------------------------------------
+ * Gestion des séances et des photos
+ *
+ * Lorsque l’administrateur lance une nouvelle soirée, il peut fournir un
+ * nom personnalisé. Ce nom est utilisé pour organiser les photos prises
+ * par les invités dans un répertoire dédié. Chaque séance est
+ * identifiée par une clé unique (sessionKey) et un nom (sessionName).
+ */
+// Nom convivial de la soirée courante. Par défaut vide jusqu’à ce qu’une
+// nouvelle session soit lancée. Le nom n’est pas nécessairement unique
+// mais sert à identifier les albums dans l’interface admin.
+let sessionName = '';
+
+/**
+ * Transforme un libellé libre en identifiant de dossier.  Remplace les
+ * caractères non alphanumériques par des tirets et met tout en
+ * minuscules.  Par exemple « Soirée d’Été » devient « soiree-d-ete ».  Ce
+ * slug est utilisé à la fois pour le nom de dossier côté serveur et
+ * l’identifiant d’album dans les URLs.
+ * @param {string} str
+ */
+function slugify(str) {
+  return (str || '')
+    .toString()
+    .normalize('NFD')               // décompose les accents
+    .replace(/\p{Diacritic}/gu, '') // supprime les diacritiques
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')    // remplace tout sauf alphanumériques
+    .replace(/^-+|-+$/g, '');       // supprime les tirets en début/fin
+}
 
 const client_id     = process.env.SPOTIFY_CLIENT_ID;
 const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
@@ -81,6 +127,13 @@ cachePlaylistFeatures(SOURCE_PLAYLIST).catch(e => {
 // l’ajout de morceaux sera refusé.
 app.get('/session-key', (_req, res) => {
   res.json({ key: sessionKey });
+});
+
+// Renvoie à la fois la clé et le nom de la session courante.  Ce point
+// d’entrée est utilisé par le frontend pour connaître le nom de l’album
+// auquel associer les photos et pour savoir si une session est active.
+app.get('/session-info', (_req, res) => {
+  res.json({ key: sessionKey, name: sessionName });
 });
 
 /* ---------- Utils ---------------------------------------------------------------- */
@@ -520,13 +573,41 @@ app.get('/suggest-similar', async (req, res) => {
 // Démarre une nouvelle soirée.  Génère une nouvelle sessionKey, vide la
 // file d’attente et la liste des morceaux joués, puis remplit la file avec
 // des titres de la playlist courante.  Retourne la nouvelle clé.
-app.post('/reset-session', async (_req, res) => {
+app.post('/reset-session', async (req, res) => {
+  // Une nouvelle session démarre : on régénère une clé, vide la file
+  // d’attente et l’historique, puis remplit à nouveau la file à partir
+  // de la playlist courante.  Le nom de séance peut être fourni via
+  // `?name=`. S’il est absent, on génère un libellé générique basé sur
+  // l’horodatage.
   sessionKey    = crypto.randomBytes(4).toString('hex');
   priorityQueue = [];
   playedTracks  = new Map();
+  // Détermination du nom de la nouvelle soirée
+  const rawName    = req.query.name || '';
+  let usedRawName  = rawName;
+  if (rawName && rawName.trim()) {
+    sessionName = slugify(rawName.trim());
+    usedRawName = rawName.trim();
+  } else {
+    // Nom par défaut basé sur la date (ex : 2025-07-27-20h15)
+    const d = new Date();
+    const pad = (n) => n.toString().padStart(2, '0');
+    const generated = `Soirée ${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}h${pad(d.getMinutes())}`;
+    usedRawName = generated;
+    sessionName = slugify(generated);
+  }
+  try {
+    // Création du dossier de la soirée pour les photos
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'photos', sessionName);
+    await fs.mkdir(dir, { recursive: true });
+    // Stocke le nom original pour un affichage convivial dans l’interface
+    await fs.writeFile(path.join(dir, 'name.txt'), usedRawName, 'utf8');
+  } catch (e) {
+    console.warn('Impossible de créer le dossier des photos', e);
+  }
   try {
     await autoFillQueue();
-    res.json({ message: 'Session reset', key: sessionKey });
+    res.json({ message: 'Session reset', key: sessionKey, name: sessionName });
   } catch (e) {
     console.error('Erreur lors de la réinitialisation de session', e);
     res.status(500).json({ error: 'Failed to reset session' });
@@ -571,6 +652,168 @@ app.post('/skip', async (_req, res) => {
   });
 
   res.json(next);
+});
+
+/* ------------------------------------------------------------------
+ * Upload et gestion des photos
+ *
+ * Les invités peuvent envoyer des clichés directement depuis leur
+ * smartphone via la page guest.  Les images sont reçues sous forme de
+ * chaînes base64 (data:URI), décodées et stockées dans un répertoire
+ * associé à la session courante (sessionName).  L’admin peut ensuite
+ * consulter, télécharger ou supprimer les albums via l’interface DJ.
+ */
+
+// Expose le dossier des photos en lecture pour permettre aux navigateurs
+// d’afficher les clichés sans passer par un serveur dynamique.  Le
+// chemin virtuel /photos reflète les sous‑répertoires créés lors des
+// sessions.  Exemple : /photos/soiree-2025-07-27-20h15/1722059800000.png
+const photosDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'photos');
+app.use('/photos', express.static(photosDir));
+
+// Permet aux invités d’envoyer une image.  Le corps de la requête doit
+// contenir la propriété `image` (data URI) et la propriété `key` (clé
+// de session). Si l’image ou la clé sont manquantes ou invalides, la
+// requête est rejetée.  Les images sont nommées en fonction de l’horodatage
+// actuel afin d’éviter les collisions.
+app.post('/upload-photo', async (req, res) => {
+  try {
+    const { image, key } = req.body || {};
+    if (!image || !key) {
+      return res.status(400).json({ error: 'Missing image or key' });
+    }
+    // Vérifie que la session demandée correspond à la session courante
+    if (key !== sessionKey) {
+      return res.status(403).json({ error: 'Invalid session key' });
+    }
+    if (!sessionName) {
+      return res.status(400).json({ error: 'No active session' });
+    }
+    // Analyse du Data URI
+    const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!match) {
+      return res.status(400).json({ error: 'Invalid image data' });
+    }
+    const ext = match[1];
+    const data = match[2];
+    const buffer = Buffer.from(data, 'base64');
+    // Création du dossier si nécessaire
+    const albumDir = path.join(photosDir, sessionName);
+    await fs.mkdir(albumDir, { recursive: true });
+    const fileName = `${Date.now()}.${ext}`;
+    await fs.writeFile(path.join(albumDir, fileName), buffer);
+    res.json({ message: 'Photo saved', file: fileName });
+  } catch (e) {
+    console.error('Erreur upload-photo', e);
+    res.status(500).json({ error: 'Failed to save photo' });
+  }
+});
+
+// Fournit la liste des photos pour un album donné.  Si aucun nom n’est
+// fourni via le paramètre de requête `name`, on renvoie les photos de
+// la session en cours.  Retourne un tableau d’URLs relatives prêtes à
+// être utilisées dans des balises <img>.
+app.get('/photos-list', async (req, res) => {
+  let name = req.query.name;
+  // Par défaut, retourner les photos de la session actuelle
+  if (!name) name = sessionName;
+  if (!name) return res.json({ photos: [] });
+  const albumDir = path.join(photosDir, name);
+  try {
+    const files = await fs.readdir(albumDir);
+    // Exclut le fichier de métadonnées
+    const filtered = files.filter(f => f !== 'name.txt');
+    const urls  = filtered.map(f => `/photos/${encodeURIComponent(name)}/${encodeURIComponent(f)}`);
+    res.json({ photos: urls });
+  } catch (e) {
+    // Si le dossier n’existe pas, retourner un tableau vide
+    res.json({ photos: [] });
+  }
+});
+
+// Liste tous les albums disponibles sur le serveur.  Chaque entrée
+// contient le nom du répertoire (slug) et le nombre de photos qu’il
+// contient.  Cette route est utilisée par l’interface admin pour
+// proposer le téléchargement ou la suppression de séances terminées.
+app.get('/albums', async (_req, res) => {
+  try {
+    const dirs = await fs.readdir(photosDir);
+    const albums = [];
+    for (const d of dirs) {
+      try {
+        const stat = await fs.stat(path.join(photosDir, d));
+        if (stat.isDirectory()) {
+        const files = await fs.readdir(path.join(photosDir, d));
+        // Lecture du nom convivial si disponible
+        let display = d;
+        try {
+          const meta = await fs.readFile(path.join(photosDir, d, 'name.txt'), 'utf8');
+          display = meta.toString().trim() || d;
+        } catch {
+          // pas de nom.txt, on garde le slug
+        }
+        // Exclure le fichier name.txt du comptage des photos
+        const count = files.filter(f => f !== 'name.txt').length;
+        albums.push({ name: d, display, count });
+        }
+      } catch {
+        // ignore anything that cannot be read
+      }
+    }
+    res.json({ albums });
+  } catch (e) {
+    console.error('Erreur lors de la liste des albums', e);
+    res.status(500).json({ error: 'Failed to list albums' });
+  }
+});
+
+// Génère un fichier ZIP contenant toutes les photos d’un album.  Le ZIP
+// est créé à la volée à l’aide de la bibliothèque JSZip (présente dans
+// node_modules) et transmis directement au client.  La route renvoie
+// 404 si l’album n’existe pas.
+app.get('/album/:name/zip', async (req, res) => {
+  const name = req.params.name;
+  const albumDir = path.join(photosDir, name);
+  try {
+    const stat = await fs.stat(albumDir);
+    if (!stat.isDirectory()) throw new Error('Not a directory');
+  } catch {
+    return res.status(404).json({ error: 'Album not found' });
+  }
+  try {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    const files = await fs.readdir(albumDir);
+    for (const f of files) {
+      // Ne pas inclure le fichier de métadonnées dans l’archive
+      if (f === 'name.txt') continue;
+      const data = await fs.readFile(path.join(albumDir, f));
+      zip.file(f, data);
+    }
+    const content = await zip.generateAsync({ type: 'nodebuffer' });
+    res.setHeader('Content-Disposition', `attachment; filename="${name}.zip"`);
+    res.setHeader('Content-Type', 'application/zip');
+    res.send(content);
+  } catch (e) {
+    console.error('Erreur lors de la création du ZIP', e);
+    res.status(500).json({ error: 'Failed to create zip' });
+  }
+});
+
+// Supprime un album et toutes les photos qu’il contient.  Cette action est
+// irréversible et doit être déclenchée uniquement par l’admin via
+// l’interface DJ.  Après suppression, la liste des albums sera mise à
+// jour côté client.
+app.delete('/album/:name', async (req, res) => {
+  const name = req.params.name;
+  const albumDir = path.join(photosDir, name);
+  try {
+    await fs.rm(albumDir, { recursive: true, force: true });
+    res.json({ message: 'Album deleted' });
+  } catch (e) {
+    console.error('Erreur lors de la suppression de l’album', e);
+    res.status(500).json({ error: 'Failed to delete album' });
+  }
 });
 
 /* ---------- Static / boot -------------------------------------------------------- */
