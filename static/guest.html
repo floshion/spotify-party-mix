@@ -392,13 +392,53 @@
       const tracks = await searchTracks(query, token);
       const resultsDiv = document.getElementById("results");
       resultsDiv.innerHTML = "";
+      // Construit un tableau d’IDs pour générer des suggestions basées sur les résultats
+      const idsForSuggest = [];
       tracks.forEach(track => {
         const div = document.createElement("div");
         div.className = "result";
         div.innerHTML = `<img src="${track.album.images[0]?.url}" /><div><strong>${track.name}</strong><span>${track.artists.map(a => a.name).join(', ')}</span></div>`;
         div.onclick = () => addTrackToPriority(track.uri);
         resultsDiv.appendChild(div);
+        // Stocke l’ID pour les suggestions
+        if (track.id) idsForSuggest.push(track.id);
       });
+      // Demande au serveur d’ordonner les résultats en fonction du morceau en cours
+      if (idsForSuggest.length > 0) {
+        try {
+          const resp = await fetch('/suggest-similar?ids=' + encodeURIComponent(idsForSuggest.join(',')));
+          if (resp.ok) {
+            const data = await resp.json();
+            const ordered = data.ids || [];
+            // Créé un conteneur séparé pour les suggestions issues de la recherche
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
+            container.style.display = 'none';
+            // On ne propose que jusqu’à 4 suggestions pour ne pas saturer l’interface
+            const maxSuggest = 4;
+            const limited = ordered.slice(0, maxSuggest);
+            if (limited.length > 0) {
+              const header = document.createElement('div');
+              header.className = 'suggestion-header';
+              header.textContent = 'Suggestions similaires à la musique en cours :';
+              container.appendChild(header);
+              limited.forEach(id => {
+                // Retrouve le morceau correspondant à cet id parmi les résultats de recherche
+                const tr = tracks.find(t => t.id === id);
+                if (!tr) return;
+                const div = document.createElement('div');
+                div.className = 'suggestion-item';
+                div.innerHTML = `<img src="${tr.album.images[0]?.url}" /><div><strong>${tr.name}</strong><span>${tr.artists.map(a => a.name).join(', ')}</span></div>`;
+                div.onclick = () => addTrackToPriority(tr.uri);
+                container.appendChild(div);
+              });
+              container.style.display = 'block';
+            }
+          }
+        } catch (err) {
+          console.warn('Erreur lors des suggestions basées sur la recherche', err);
+        }
+      }
     });
 
     // Charge les suggestions basées sur le morceau en cours et les affiche au
