@@ -3,6 +3,7 @@ import fetch   from 'node-fetch';
 import dotenv  from 'dotenv';
 import path    from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -21,6 +22,13 @@ const TARGET_QUEUE_LENGTH = 6;
 let priorityQueue = [];                  // [{ uri,name,artists,image,auto }]
 let playedTracks  = new Set();
 
+// Génère une clé de session aléatoire à chaque démarrage du serveur.
+// Cette clé est utilisée pour créer une URL unique pour la page invité
+// (via le QR code). Les invités doivent fournir cette clé lorsqu’ils
+// ajoutent un morceau, empêchant ainsi les personnes ayant un ancien lien
+// de continuer à interagir avec la playlist.
+const sessionKey = crypto.randomBytes(4).toString('hex');
+
 /* ---------- Auth ---------------------------------------------------------------- */
 async function refreshAccessToken () {
   if (!refresh_token) return;
@@ -37,6 +45,14 @@ async function refreshAccessToken () {
 }
 await refreshAccessToken();
 setInterval(refreshAccessToken, 50*60*1000);
+
+/* ---------- Session Key --------------------------------------------------------- */
+// Renvoie la clé de session actuelle. Le frontend récupère cette clé
+// pour générer une URL de participation unique dans le QR code. Sans cette clé,
+// l’ajout de morceaux sera refusé.
+app.get('/session-key', (_req, res) => {
+  res.json({ key: sessionKey });
+});
 
 /* ---------- Utils ---------------------------------------------------------------- */
 function purgeQueue(){ priorityQueue = priorityQueue.filter(t=>!playedTracks.has(t.uri)); }
@@ -62,11 +78,14 @@ async function fetchRandomTracksFromPlaylist(id, limit=3){
     if(!item?.track) continue;
     if(playedTracks.has(item.track.uri)) continue;
     out.push({
-      uri:item.track.uri,
-      name:item.track.name,
-      artists:item.track.artists.map(a=>a.name).join(', '),
-      image:item.track.album.images?.[0]?.url||'',
-      auto:true
+      uri:    item.track.uri,
+      name:   item.track.name,
+      artists:item.track.artists.map(a => a.name).join(', '),
+      image:  item.track.album.images?.[0]?.url || '',
+      auto:   true,
+      // Les morceaux auto n’ont pas d’invité spécifique ; ce champ sert
+      // d’indicateur lors de l’affichage et du calcul des limites
+      guest:  'Auto'
     });
   }
   return out;
@@ -86,16 +105,49 @@ async function autoFillQueue(){
 app.get('/token', (_q,res)=>res.json({access_token}));
 
 app.post('/add-priority-track', async (req,res)=>{
-  const uri=req.query.uri;
-  if(!uri) return res.status(400).json({error:'No URI'});
-  if(playedTracks.has(uri)) return res.status(400).json({error:'Track already played'});
+  const uri = req.query.uri;
+  if (!uri) return res.status(400).json({ error: 'No URI' });
+  // Refuse si le morceau a déjà été joué lors de cette session
+  if (playedTracks.has(uri)) return res.status(400).json({ error:'Track already played' });
+
+  // Vérifie que la clé de session envoyée par l’invité correspond bien
+  const providedKey = req.query.key;
+  // Toute requête d’ajout doit comporter la clé de session. Sans cette clé,
+  // ou si elle ne correspond pas à la clé courante, l’ajout est refusé.
+  if (providedKey !== sessionKey) {
+    return res.status(400).json({ error: 'Invalid session key' });
+  }
+  // Nom de l’invité ; par défaut « Invité » si non fourni
+  const guestName = req.query.guest || 'Invité';
+  // Compte les morceaux consécutifs ajoutés par ce même invité (on ignore les morceaux auto)
+  let consecutive = 0;
+  for (let i = priorityQueue.length - 1; i >= 0; i--) {
+    const t = priorityQueue[i];
+    // Si on rencontre un morceau auto, on arrête le comptage ; la séquence est brisée
+    if (t.auto) break;
+    if (t.guest === guestName) {
+      consecutive++;
+    } else {
+      break;
+    }
+  }
+  // Limite : pas plus de 2 morceaux consécutifs par personne
+  if (consecutive >= 2) {
+    return res.status(400).json({ error: 'Limit per guest reached' });
+  }
 
   const id = uri.split(':').pop();
   const track = await (await fetch(`https://api.spotify.com/v1/tracks/${id}?market=FR`,
     {headers:{Authorization:'Bearer '+access_token}})).json();
 
-  const tInfo={ uri, name:track.name, artists:track.artists.map(a=>a.name).join(', '),
-                image:track.album.images?.[0]?.url||'', auto:false };
+  const tInfo = {
+    uri,
+    name: track.name,
+    artists: track.artists.map(a => a.name).join(', '),
+    image: track.album.images?.[0]?.url || '',
+    auto: false,
+    guest: guestName
+  };
 
   // On insère avant le premier "auto" (invités groupés devant les autos)
   const firstAutoIndex = priorityQueue.findIndex(t => t.auto);
