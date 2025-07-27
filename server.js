@@ -5,6 +5,13 @@ import path    from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import fs from 'fs/promises';
+// Importation de JSZip une seule fois.  Si la bibliothèque n’est pas
+// disponible dans l’environnement, l’import échouera au lancement du
+// serveur, évitant de créer des erreurs dynamiques lors de la
+// génération des archives.  JSZip est une dépendance transitive de
+// pptxgenjs et est disponible dans node_modules.
+import JSZipPkg from 'jszip';
+const JSZip = JSZipPkg?.default || JSZipPkg;
 
 /* ------------------------------------------------------------------------
  * Ajout du support JSON volumineux et gestion des photos
@@ -781,7 +788,6 @@ app.get('/album/:name/zip', async (req, res) => {
     return res.status(404).json({ error: 'Album not found' });
   }
   try {
-    const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
     const files = await fs.readdir(albumDir);
     for (const f of files) {
