@@ -119,11 +119,14 @@ app.post('/add-priority-track', async (req,res)=>{
   }
   // Nom de l’invité ; par défaut « Invité » si non fourni
   const guestName = req.query.guest || 'Invité';
-  // Compte les morceaux consécutifs ajoutés par ce même invité (on ignore les morceaux auto)
+  // Compte les morceaux consécutifs ajoutés par cet invité en début de file (ordre de lecture).
+  // Comme les morceaux invités sont toujours insérés avant les morceaux auto, on analyse
+  // la file depuis le début : si les deux premiers morceaux appartiennent déjà au même
+  // invité, un troisième ajout est refusé.
   let consecutive = 0;
-  for (let i = priorityQueue.length - 1; i >= 0; i--) {
+  for (let i = 0; i < priorityQueue.length; i++) {
     const t = priorityQueue[i];
-    // Si on rencontre un morceau auto, on arrête le comptage ; la séquence est brisée
+    // On arrête dès qu'on tombe sur un morceau auto ou un autre invité
     if (t.auto) break;
     if (t.guest === guestName) {
       consecutive++;
@@ -131,7 +134,6 @@ app.post('/add-priority-track', async (req,res)=>{
       break;
     }
   }
-  // Limite : pas plus de 2 morceaux consécutifs par personne
   if (consecutive >= 2) {
     return res.status(400).json({ error: 'Limit per guest reached' });
   }
