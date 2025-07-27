@@ -29,6 +29,15 @@
     .queue-item strong { font-size: 16px; display: block; }
     .queue-item span { font-size: 14px; color: #aaa; }
 
+    /* Style pour le label “Ajouté par” dans la liste des morceaux */
+    .queue-item .by {
+      display: block;
+      font-size: 13px;
+      color: #1DB954;
+      font-style: italic;
+      margin-top: 2px;
+    }
+
     /* Modal résultats */
     .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(13,13,13,0.95); z-index: 2000; display: none; flex-direction: column; opacity: 0; transition: opacity 0.3s ease; }
     .modal.show { display: flex; opacity: 1; }
@@ -57,6 +66,53 @@
       opacity: 0;
       transition: opacity 0.3s ease;
       z-index: 3000;
+    }
+
+    /* ----- Modal prénom ----- */
+    .name-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 4000;
+    }
+    .name-dialog {
+      background: #1c1c1e;
+      padding: 25px 30px;
+      border-radius: 20px;
+      width: 90%;
+      max-width: 360px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+    }
+    .name-dialog h2 {
+      margin: 0 0 12px;
+      font-size: 24px;
+      color: #fff;
+    }
+    .name-dialog input {
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: none;
+      margin-bottom: 18px;
+      font-size: 18px;
+      color: #fff;
+      background: #2c2c2e;
+    }
+    .name-dialog button {
+      background: #1DB954;
+      border: none;
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 18px;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -100,6 +156,15 @@
   <!-- Toast -->
   <div id="toast"></div>
 
+  <!-- Modal pour saisir le prénom -->
+  <div id="nameModal" class="name-modal">
+    <div class="name-dialog">
+      <h2>Ton prénom ?</h2>
+      <input type="text" id="nameInput" placeholder="Saisis ton prénom" />
+      <button id="nameSubmit">Valider</button>
+    </div>
+  </div>
+
   <script>
     // Variables de session et identification de l’invité
     // Une clé de session unique est fournie par le serveur pour chaque soirée. Elle
@@ -107,11 +172,7 @@
     // permette pas de continuer à interagir avec la playlist. Le prénom est
     // demandé une seule fois et conservé localement.
     let sessionKey = '';
-    let guestName  = localStorage.getItem('guestName');
-    if (!guestName) {
-      guestName = prompt('Quel est ton prénom ?') || 'Invité';
-      localStorage.setItem('guestName', guestName);
-    }
+    let guestName  = localStorage.getItem('guestName') || '';
     // Récupère la clé de session depuis le paramètre d’URL (?key=...).
     // Si aucune clé n’est fournie (accès direct), on demande la clé au serveur.
     {
@@ -123,6 +184,29 @@
         fetch('/session-key').then(res => res.json()).then(d => { sessionKey = d.key; });
       }
     }
+
+    // Affiche le modal de saisie du prénom si aucun nom n’a encore été enregistré
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!guestName) {
+        const modal = document.getElementById('nameModal');
+        modal.style.display = 'flex';
+        const input = document.getElementById('nameInput');
+        const submitBtn = document.getElementById('nameSubmit');
+        // Lorsque l’utilisateur valide, on enregistre son nom et on ferme la fenêtre
+        const validateName = () => {
+          const val = input.value.trim();
+          guestName = val || 'Invité';
+          localStorage.setItem('guestName', guestName);
+          modal.style.display = 'none';
+        };
+        submitBtn.addEventListener('click', validateName);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            validateName();
+          }
+        });
+      }
+    });
 
     async function getToken() {
       const res = await fetch('/token');
@@ -166,11 +250,18 @@
       queue.forEach(track => {
         const div = document.createElement('div');
         div.className = 'queue-item';
-        // Détermine qui a ajouté le morceau (invité ou auto)
-        const by = track.guest || track.guestName || (track.auto ? 'Auto' : '');
-        div.innerHTML = `<img src="${track.image}" />` +
-                        `<div><strong>${track.name}</strong>` +
-                        `<span>${track.artists}${by ? ' • ' + by : ''}</span></div>`;
+        // Ne pas afficher "Auto" pour les morceaux automatiques ; uniquement
+        // mettre en avant le prénom de l’invité si présent.
+        const byName = track.auto ? '' : (track.guest || track.guestName || '');
+        let inner = `<img src="${track.image}" />`;
+        inner += '<div>';
+        inner += `<strong>${track.name}</strong>`;
+        inner += `<span>${track.artists}</span>`;
+        if (byName) {
+          inner += `<span class="by">Ajouté par ${byName}</span>`;
+        }
+        inner += '</div>';
+        div.innerHTML = inner;
         container.appendChild(div);
       });
     }

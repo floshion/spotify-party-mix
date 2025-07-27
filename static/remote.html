@@ -27,6 +27,7 @@
     .item img{width:46px;height:46px;border-radius:6px;margin-right:10px}
     .item strong{display:block;font-size:15px}
     .item span{font-size:13px;color:#aaa}
+.by{display:block;font-size:12px;color:#1DB954;font-style:italic;margin-top:2px}
     #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:rgba(40,40,40,.95);
            color:#fff;padding:10px 18px;border-radius:25px;font-size:14px;opacity:0;transition:opacity .3s;z-index:3000}
 
@@ -64,7 +65,17 @@
   <button class="btn add" id="open">➕ Ajouter</button>
 </div>
 
-<div class="queue"><h3>À venir</h3><div id="list"></div></div>
+<div class="queue">
+  <h3>À venir</h3>
+  <div class="guest-list">
+    <h4 style="margin:8px 0 5px;font-size:16px;color:#fff;">Invités</h4>
+    <div id="guestList"></div>
+  </div>
+  <div class="auto-list" style="margin-top:10px;">
+    <h4 style="margin:8px 0 5px;font-size:16px;color:#fff;">Playlist auto</h4>
+    <div id="autoList"></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <!-- Modal recherche -->
@@ -82,7 +93,9 @@ const artist  = document.getElementById('artist');
 const prog    = document.getElementById('prog');
 const cur     = document.getElementById('cur');
 const dur     = document.getElementById('dur');
-const list    = document.getElementById('list');
+// Listes séparées pour les invités et la playlist auto
+const guestListEl = document.getElementById('guestList');
+const autoListEl  = document.getElementById('autoList');
 const toastEl = document.getElementById('toast');
 
 const toggle  = document.getElementById('toggle');
@@ -123,13 +136,22 @@ async function now(){
 
 /* -------- File d'attente -------- */
 async function queue(){
-  const q = await (await fetch('/priority-queue')).json();
-  list.innerHTML = '';
+  const q  = await (await fetch('/priority-queue')).json();
+  guestListEl.innerHTML = '';
+  autoListEl.innerHTML  = '';
   q.queue.forEach(t => {
-    const by = t.guest || t.guestName || (t.auto ? 'Auto' : '');
-    list.insertAdjacentHTML('beforeend',
-      `<div class="item"><img src="${t.image}">` +
-      `<div><strong>${t.name}</strong><span>${t.artists}${by ? ' • ' + by : ''}</span></div></div>`);
+    // Ne pas afficher le label "Auto" pour les morceaux automatiques afin
+    // d’épurer l’affichage et rendre l’étiquette réservée aux invités.
+    const byName = t.auto ? '' : (t.guest || t.guestName || '');
+    const html = `<div class="item"><img src="${t.image}"><div><strong>${t.name}</strong>` +
+                 `<span>${t.artists}</span>` +
+                 (byName ? `<span class="by">Ajouté par ${byName}</span>` : '') +
+                 `</div></div>`;
+    if (t.auto) {
+      autoListEl.insertAdjacentHTML('beforeend', html);
+    } else {
+      guestListEl.insertAdjacentHTML('beforeend', html);
+    }
   });
 }
 

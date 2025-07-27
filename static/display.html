@@ -99,24 +99,44 @@
       margin-bottom:20px;
       font-size:32px;
     }
-    #priorityQueueList {
-      list-style:none;
-      padding:0;
+    /* Files d’attente séparées pour les invités et la playlist auto */
+    #guestQueueList,
+    #autoQueueList {
+      list-style: none;
+      padding: 0;
+      margin: 0;
     }
-    #priorityQueueList li {
-      display:flex;
-      align-items:center;
-      gap:15px;
-      background:#222;
-      padding:15px;
-      border-radius:10px;
-      margin-bottom:15px;
-      font-size:24px;
+    #guestQueueList li,
+    #autoQueueList li {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      background: #222;
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 15px;
+      font-size: 24px;
     }
-    #priorityQueueList img {
-      width:80px;
-      height:80px;
-      border-radius:10px;
+    #guestQueueList img,
+    #autoQueueList img {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+    }
+    #guestQueueList .by,
+    #autoQueueList .by {
+      display:block;
+      font-size:20px;
+      color:#1DB954; /* couleur accentuée pour la mention “Ajouté par” */
+      font-style:italic;
+      margin-top:4px;
+    }
+    #priorityQueueList .by {
+      display:block;
+      font-size:20px;
+      color:#1DB954;
+      font-style:italic;
+      margin-top:4px;
     }
   </style>
 </head>
@@ -147,7 +167,14 @@
     <!-- File d'attente -->
     <div class="queue-container">
       <h3>À venir</h3>
-      <ul id="priorityQueueList"></ul>
+      <div class="guest-list">
+        <h4 style="font-size:28px;margin:10px 0;color:#fff;">Invités</h4>
+        <ul id="guestQueueList"></ul>
+      </div>
+      <div class="auto-list" style="margin-top:20px;">
+        <h4 style="font-size:28px;margin:10px 0;color:#fff;">Playlist auto</h4>
+        <ul id="autoQueueList"></ul>
+      </div>
     </div>
   </div>
 
@@ -177,18 +204,25 @@
     async function updatePriorityQueue(){
       const res  = await fetch('/priority-queue');
       const data = await res.json();
-      const list = document.getElementById('priorityQueueList');
-      list.innerHTML = '';
-      data.queue.forEach(track=>{
-        const li  = document.createElement('li');
+      const guestList = document.getElementById('guestQueueList');
+      const autoList  = document.getElementById('autoQueueList');
+      guestList.innerHTML = '';
+      autoList.innerHTML  = '';
+      data.queue.forEach(track => {
+        const by = track.guest || track.guestName || (track.auto ? 'Auto' : '');
+        const li = document.createElement('li');
         const img = document.createElement('img');
-        img.src   = track.image;
-        const span= document.createElement('span');
-        const by  = track.guest || track.guestName || (track.auto ? 'Auto' : '');
-        span.textContent = `${track.name} – ${track.artists}${by ? ' • ' + by : ''}`;
+        img.src = track.image;
+        const txt = document.createElement('div');
+        txt.innerHTML = `<span>${track.name} – ${track.artists}</span>` +
+                        (by ? `<span class="by">Ajouté par ${by}</span>` : '');
         li.appendChild(img);
-        li.appendChild(span);
-        list.appendChild(li);
+        li.appendChild(txt);
+        if (track.auto) {
+          autoList.appendChild(li);
+        } else {
+          guestList.appendChild(li);
+        }
       });
     }
 

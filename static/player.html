@@ -21,9 +21,37 @@
     .next{background:#ff9800}.next:hover{background:#ffb84d}
     .queue-container{flex:1;background:#222;padding:15px;border-radius:10px;overflow-y:auto;max-height:500px}
     .queue-container h3{text-align:center;margin-bottom:10px}
-    #priorityQueueList{list-style:none;padding:0}
-    #priorityQueueList li{display:flex;align-items:center;gap:10px;background:#333;padding:8px;border-radius:5px;margin-bottom:8px}
-    #priorityQueueList img{width:50px;height:50px;border-radius:5px}
+    /* Listes des files d’attente (invités vs auto) */
+    #guestQueueList,
+    #autoQueueList{
+      list-style:none;
+      padding:0;
+      margin:0;
+    }
+    #guestQueueList li,
+    #autoQueueList li{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      background:#333;
+      padding:8px;
+      border-radius:5px;
+      margin-bottom:8px;
+    }
+    #guestQueueList img,
+    #autoQueueList img{
+      width:50px;
+      height:50px;
+      border-radius:5px;
+    }
+    #guestQueueList .by,
+    #autoQueueList .by {
+      display:block;
+      font-size:14px;
+      color:#1DB954; /* accentue la mention “Ajouté par” avec la couleur Spotify */
+      font-style:italic;
+      margin-top:2px;
+    }
     #errorMsg{color:#ff4444;font-size:16px;margin-top:10px}
     .progress-container{width:100%;max-width:320px;height:8px;background:#333;border-radius:4px;margin-top:15px}
     .progress-bar{height:100%;background:#1DB954;width:0%;border-radius:4px}
@@ -56,7 +84,17 @@
       <p id="errorMsg"></p>
     </div>
 
-    <div class="queue-container"><h3>Morceaux à venir :</h3><ul id="priorityQueueList"></ul></div>
+    <div class="queue-container">
+      <h3>Morceaux à venir :</h3>
+      <div class="guest-list">
+        <h4 style="margin:8px 0 5px;font-size:18px;color:#fff;">Invités</h4>
+        <ul id="guestQueueList"></ul>
+      </div>
+      <div class="auto-list" style="margin-top:10px;">
+        <h4 style="margin:8px 0 5px;font-size:18px;color:#fff;">Playlist auto</h4>
+        <ul id="autoQueueList"></ul>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -87,12 +125,19 @@
     async function updatePriorityQueue(){
       const res  = await fetch('/priority-queue');
       const data = await res.json();
-      const list = document.getElementById('priorityQueueList');
-      list.innerHTML = '';
-      data.queue.forEach(t=>{
-        const by = t.guest || t.guestName || (t.auto ? 'Auto' : '');
-        list.insertAdjacentHTML('beforeend',
-          `<li><img src="${t.image}"><span>${t.name} – ${t.artists}${by ? ' • ' + by : ''}</span></li>`);
+      const guestList = document.getElementById('guestQueueList');
+      const autoList  = document.getElementById('autoQueueList');
+      guestList.innerHTML = '';
+      autoList.innerHTML  = '';
+      data.queue.forEach(t => {
+        // On affiche le prénom uniquement pour les morceaux invités
+        const by = t.auto ? '' : (t.guest || t.guestName || '');
+        const html = `<li><img src="${t.image}"><div><span>${t.name}</span><br><span>${t.artists}</span>` + (by ? `<span class="by">Ajouté par ${by}</span>` : '') + `</div></li>`;
+        if (t.auto) {
+          autoList.insertAdjacentHTML('beforeend', html);
+        } else {
+          guestList.insertAdjacentHTML('beforeend', html);
+        }
       });
     }
     setInterval(updatePriorityQueue,5000);
