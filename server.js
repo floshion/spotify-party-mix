@@ -424,6 +424,66 @@ app.get('/recommendations', async (_req, res) => {
   }
 });
 
+/* ---------- Suggestions basées sur les résultats de recherche ---------- */
+// Compare les morceaux proposés par l’utilisateur (via l’input de recherche)
+// au morceau actuellement en cours pour identifier ceux qui s’enchaîneront
+// harmonieusement.  Le client transmet une liste d’identifiants Spotify
+// (paramètre ids) séparés par des virgules.  Le serveur récupère les
+// caractéristiques audio du morceau en cours et celles de chaque ID fourni,
+// calcule une distance basée sur le tempo et la tonalité, puis renvoie
+// l’ordre des IDs triés du plus proche au plus éloigné.  Aucun appel
+// supplémentaire à l’API de recommandations Spotify n’est nécessaire.
+app.get('/suggest-similar', async (req, res) => {
+  try {
+    const idsParam = req.query.ids;
+    if (!idsParam) return res.json({ ids: [] });
+    // Nettoie et limite le nombre d’IDs à traiter pour éviter les abus
+    const ids = idsParam.split(',').map(id => id.trim()).filter(Boolean).slice(0, 50);
+    if (ids.length === 0) return res.json({ ids: [] });
+    // Récupère le morceau actuellement en lecture
+    const nowRes = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+    if (!nowRes.ok) return res.json({ ids: [] });
+    const nowJson = await nowRes.json();
+    if (!nowJson || !nowJson.item) return res.json({ ids: [] });
+    const seedId = nowJson.item.id;
+    // Caractéristiques du morceau en cours
+    const featSeedRes = await fetch(`https://api.spotify.com/v1/audio-features/${seedId}`, {
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+    if (!featSeedRes.ok) return res.json({ ids: [] });
+    const seedFeat = await featSeedRes.json();
+    const seedTempo = seedFeat.tempo || 0;
+    const seedKey   = seedFeat.key;
+    const seedMode  = seedFeat.mode;
+    // Récupère les features des morceaux proposés via l’API audio-features en un seul appel
+    const idsString = ids.join(',');
+    const featRes = await fetch(`https://api.spotify.com/v1/audio-features?ids=${idsString}`, {
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+    if (!featRes.ok) return res.json({ ids: [] });
+    const featJson = await featRes.json();
+    const features = featJson.audio_features || [];
+    // Calcule la distance pour chaque ID
+    const scored = ids.map((id, index) => {
+      const f = features[index] || {};
+      const tempoDiff = Math.abs((f.tempo || 0) - seedTempo);
+      const keyPenalty  = (f.key === seedKey) ? 0 : 50;
+      const modePenalty = (f.mode === seedMode) ? 0 : 25;
+      const score = tempoDiff + keyPenalty + modePenalty;
+      return { id, score };
+    });
+    scored.sort((a, b) => a.score - b.score);
+    // Renvoie la liste triée des IDs du plus proche au plus éloigné
+    const orderedIds = scored.map(s => s.id);
+    res.json({ ids: orderedIds });
+  } catch (e) {
+    console.error('Erreur suggestion similaire', e);
+    res.status(500).json({ ids: [] });
+  }
+});
+
 // Démarre une nouvelle soirée.  Génère une nouvelle sessionKey, vide la
 // file d’attente et la liste des morceaux joués, puis remplit la file avec
 // des titres de la playlist courante.  Retourne la nouvelle clé.
