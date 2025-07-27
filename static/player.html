@@ -327,6 +327,10 @@
     }
     setInterval(updatePriorityQueue,5000);
 
+    // Rafraîchit la liste des albums toutes les 10 secondes pour
+    // refléter les nouvelles photos sans recharger la page.
+    setInterval(updateAlbumsList, 10000);
+
     // Met à jour la liste des albums (photos) disponibles.  Cette
     // fonction récupère la liste via l’endpoint /albums et construit
     // dynamiquement les éléments de la liste avec un lien de téléchargement
