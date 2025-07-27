@@ -221,40 +221,14 @@
     // demandé une seule fois et conservé localement.
     let sessionKey = '';
     let guestName  = localStorage.getItem('guestName') || '';
-    // Récupère la clé de session depuis le paramètre d’URL (?key=...).
-    // Si aucune clé n’est fournie (accès direct), on demande la clé au serveur.
-    {
-      const params = new URLSearchParams(window.location.search);
-      const keyParam = params.get('key');
-      if (keyParam) {
-        sessionKey = keyParam;
-      } else {
-        fetch('/session-key').then(res => res.json()).then(d => { sessionKey = d.key; });
-      }
-    }
-    // Lorsque la clé de session est disponible, compare‑la à celle stockée localement.
-    // Si elle diffère, on réinitialise le prénom pour forcer une nouvelle saisie.
-    const checkSession = () => {
-      const storedKey = localStorage.getItem('sessionKey');
-      if (!storedKey || storedKey !== sessionKey) {
-        localStorage.removeItem('guestName');
-        guestName = '';
-        localStorage.setItem('sessionKey', sessionKey);
-      } else {
-        guestName = localStorage.getItem('guestName') || '';
-      }
-    };
-    // Diffère l’appel pour laisser sessionKey se remplir (dans le cas du fetch)
-    setTimeout(checkSession, 200);
 
-    // Affiche le modal de saisie du prénom si aucun nom n’a encore été enregistré
-    document.addEventListener('DOMContentLoaded', () => {
+    // Invite l’utilisateur à saisir son prénom si aucun nom n’est stocké.
+    function maybeAskName() {
       if (!guestName) {
-        const modal = document.getElementById('nameModal');
+        const modal    = document.getElementById('nameModal');
         modal.style.display = 'flex';
-        const input = document.getElementById('nameInput');
-        const submitBtn = document.getElementById('nameSubmit');
-        // Lorsque l’utilisateur valide, on enregistre son nom et on ferme la fenêtre
+        const input    = document.getElementById('nameInput');
+        const submitBtn= document.getElementById('nameSubmit');
         const validateName = () => {
           const val = input.value.trim();
           guestName = val || 'Invité';
@@ -263,12 +237,41 @@
         };
         submitBtn.addEventListener('click', validateName);
         input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            validateName();
-          }
+          if (e.key === 'Enter') validateName();
         });
       }
-    });
+    }
+
+    // Compare la clé de session courante à celle stockée en local.  Si elle
+    // diffère, on réinitialise le prénom pour obliger l’utilisateur à se
+    // présenter à nouveau.  Ensuite on invite à saisir le prénom si besoin.
+    function checkSession() {
+      const storedKey = localStorage.getItem('sessionKey');
+      if (!storedKey || storedKey !== sessionKey) {
+        localStorage.removeItem('guestName');
+        guestName = '';
+        localStorage.setItem('sessionKey', sessionKey);
+      } else {
+        guestName = localStorage.getItem('guestName') || '';
+      }
+      maybeAskName();
+    }
+
+    // Récupère la clé de session à partir de l’URL ou via une requête au
+    // serveur, puis exécute checkSession.
+    {
+      const params = new URLSearchParams(window.location.search);
+      const keyParam = params.get('key');
+      if (keyParam) {
+        sessionKey = keyParam;
+        checkSession();
+      } else {
+        fetch('/session-key').then(res => res.json()).then(d => {
+          sessionKey = d.key;
+          checkSession();
+        });
+      }
+    }
 
     async function getToken() {
       const res = await fetch('/token');
@@ -404,19 +407,32 @@
     // modal.
     async function loadSuggestions() {
       try {
-        const res  = await fetch('/recommendations');
-        const data = await res.json();
         const container = document.getElementById('suggestionsContainer');
-        // Vide et cache le conteneur par défaut
         container.innerHTML = '';
         container.style.display = 'none';
-        if (!data.tracks || data.tracks.length === 0) return;
-        // Ajoute un en‑tête pour distinguer les suggestions des résultats
+        const token = await getToken();
+        // Récupère le morceau actuellement en cours via l’API Spotify
+        const now = await fetchCurrentTrack(token);
+        if (!now || !now.item) return;
+        const seedId = now.item.id;
+        // Demande des recommandations directement à l’API Spotify
+        const recRes = await fetch(`https://api.spotify.com/v1/recommendations?seed_tracks=${seedId}&limit=4&market=FR`, {
+          headers: { Authorization: 'Bearer ' + token }
+        });
+        if (!recRes.ok) return;
+        const recJson = await recRes.json();
+        const tracks = (recJson.tracks || []).map(t => ({
+          uri: t.uri,
+          name: t.name,
+          artists: t.artists.map(a => a.name).join(', '),
+          image: t.album.images?.[0]?.url || ''
+        }));
+        if (!tracks.length) return;
         const header = document.createElement('div');
         header.className = 'suggestion-header';
         header.textContent = 'Suggestions adaptées au morceau en cours :';
         container.appendChild(header);
-        data.tracks.forEach(t => {
+        tracks.forEach(t => {
           const div = document.createElement('div');
           div.className = 'suggestion-item';
           div.innerHTML = `<img src="${t.image}" /><div><strong>${t.name}</strong><span>${t.artists}</span></div>`;
