@@ -4,13 +4,11 @@
   "description": "Site/serveur Express + chiffrement Staticrypt pour /player",
   "type": "module",
   "main": "server.js",
-
   "scripts": {
     "encrypt-player": "staticrypt static/player.html $PASSWORD -o static/player.html",
-    "postinstall": "npm run encrypt-player", // s’exécute automatiquement sur Render après npm install
+    "postinstall": "npm run encrypt-player",
     "start": "node server.js"
   },
-
   "dependencies": {
     "express": "^4.19.2",
     "node-fetch": "^3.3.2",
