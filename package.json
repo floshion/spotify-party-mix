@@ -7,7 +7,7 @@
 
   "scripts": {
     "encrypt-player": "staticrypt static/player.html $PASSWORD -o static/player.html",
-    "build": "npm run encrypt-player",
+    "postinstall": "npm run encrypt-player", // s’exécute automatiquement sur Render après npm install
     "start": "node server.js"
   },
 
