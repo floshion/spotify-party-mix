@@ -6,7 +6,7 @@
   "main": "server.js",
 
   "scripts": {
-    "encrypt-player": "staticrypt public/player.html $PASSWORD -o public/player.html",
+    "encrypt-player": "staticrypt static/player.html $PASSWORD -o static/player.html",
     "build": "npm run encrypt-player",
     "start": "node server.js"
   },
