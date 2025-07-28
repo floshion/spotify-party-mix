@@ -13,6 +13,65 @@ import fs from 'fs/promises';
 import JSZipPkg from 'jszip';
 const JSZip = JSZipPkg?.default || JSZipPkg;
 
+/* ----------------------------------------------------------------------
+ * Protection de la page « player »
+ *
+ * Dans certains contextes (soirée privée, événement restreint), l'hôte peut
+ * souhaiter empêcher l'accès libre à l'interface DJ située sur `/player.html`.
+ * Pour cela, on utilise un mot de passe fourni via une variable d'environnement
+ * `PLAYER_PASSWORD` (ou simplement `PASSWORD` pour rester compatible avec
+ * l'intitulé de la question). Lorsque cette variable est définie, les
+ * requêtes vers la page d'accueil (`/`) et vers `/player.html` sont
+ * protégées par une authentification HTTP Basic. Si aucune variable de mot
+ * de passe n'est fournie, la page reste accessible sans protection.
+ */
+const PLAYER_PASSWORD = process.env.PLAYER_PASSWORD || process.env.PASSWORD || '';
+
+/**
+ * Middleware qui impose un mot de passe pour l'accès à la page DJ.  Cette
+ * fonction vérifie l'en-tête `Authorization` d'une requête.  Si ce header
+ * contient des informations valides et que le mot de passe correspond à
+ * celui défini dans la configuration, l'exécution se poursuit.  Dans le
+ * cas contraire, la réponse est une demande d'authentification Basic.
+ *
+ * On n'utilise pas ici de dépendance supplémentaire afin de rester
+ * compatible avec le chargement ES Modules.  Le mot de passe attendu doit
+ * être placé dans la partie « pass » des identifiants.  Le nom
+ * d'utilisateur n'a aucune importance et peut être laissé vide par
+ * l'utilisateur lorsqu'il saisit ses identifiants.
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function requirePlayerPassword(req, res, next) {
+  // Si aucun mot de passe n'a été configuré, ne filtre pas les requêtes.
+  if (!PLAYER_PASSWORD) return next();
+  const authHeader = req.headers['authorization'];
+  if (authHeader && typeof authHeader === 'string') {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && parts[0].toLowerCase() === 'basic') {
+      // Decode base64 credentials (format « username:password »)
+      try {
+        const buf = Buffer.from(parts[1], 'base64');
+        const decoded = buf.toString('utf8');
+        const idx = decoded.indexOf(':');
+        // Mot de passe = tout ce qui se trouve après le premier ':'
+        const providedPass = idx >= 0 ? decoded.slice(idx + 1) : decoded;
+        if (providedPass === PLAYER_PASSWORD) {
+          return next();
+        }
+      } catch (_) {
+        // Ignorer toute erreur de décodage et tomber plus bas
+      }
+    }
+  }
+  // Demande d'authentification HTTP Basic avec un libellé explicite.  La
+  // plupart des navigateurs afficheront une boîte de dialogue de saisie.
+  res.set('WWW-Authenticate', 'Basic realm="DJ Player"');
+  return res.status(401).send('Mot de passe requis pour accéder à cette page.');
+}
+
 /* ------------------------------------------------------------------------
  * Ajout du support JSON volumineux et gestion des photos
  *
@@ -1023,13 +1082,32 @@ app.delete('/album/:name', async (req, res) => {
 });
 
 /* ---------- Static / boot -------------------------------------------------------- */
-const __filename=fileURLToPath(import.meta.url);
-const __dirname =path.dirname(__filename);
-app.use(express.static(path.join(__dirname,'static')));
-app.get('/',     (_q,res)=>res.redirect('/player.html'));
-app.get('/guest',(_q,res)=>res.redirect('/guest.html'));
-app.get('/display',(_q,res)=>res.redirect('/display.html'));
-app.get('/remote', (_q,res)=>res.redirect('/remote.html'));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+// Protection conditionnelle de la page DJ.  Si un mot de passe est
+// configuré, les accès à la racine et à /player.html passent d'abord
+// par le middleware `requirePlayerPassword`.  Dans le cas contraire
+// (PLAYER_PASSWORD vide), on redirige directement sans filtrage.
+if (PLAYER_PASSWORD) {
+  app.get('/', requirePlayerPassword, (_req, res) => res.redirect('/player.html'));
+  app.get('/player.html', requirePlayerPassword, (req, res, next) => next());
+} else {
+  app.get('/', (_req, res) => res.redirect('/player.html'));
+}
+
+// Sert les fichiers statiques (CSS, JS, HTML, images).  Cette
+// déclaration est volontairement placée après la protection afin que
+// l'interception soit effective avant de laisser Express servir la
+// ressource demandée.  Note : les autres pages (guest, display,
+// remote) restent accessibles librement, car elles ne sont pas
+// protégées par requirePlayerPassword.
+app.use(express.static(path.join(__dirname, 'static')));
+
+// Routes de redirection explicites pour les pages statiques des invités.
+app.get('/guest',   (_req, res) => res.redirect('/guest.html'));
+app.get('/display', (_req, res) => res.redirect('/display.html'));
+app.get('/remote',  (_req, res) => res.redirect('/remote.html'));
 
 app.listen(PORT,()=>console.log(`🚀 Server sur ${PORT}`));
 setInterval(()=>autoFillQueue(),20*1000);
