@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Test Recos Compatibles</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .row { display:flex; gap:12px; flex-wrap: wrap; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:9999px; border:1px solid #ccc; margin-right:6px; }
+    .list li { margin: 8px 0; }
+    button { padding:8px 12px; border-radius:10px; border:1px solid #ccc; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Test recommandations compatibles</h1>
+
+  <div class="card">
+    <h2>Morceau en cours</h2>
+    <div id="now">—</div>
+  </div>
+
+  <div class="card">
+    <h2>Caractéristiques ciblées</h2>
+    <div class="row">
+      <div class="pill"><b>BPM :</b> <span id="bpm">—</span></div>
+      <div class="pill"><b>Clé :</b> <span id="key">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Suggestions (3–4)</h2>
+    <ul id="sugs" class="list"></ul>
+  </div>
+
+  <script type="module">
+    async function loadAll() {
+      const now = await (await fetch('/ext/current-features')).json();
+      const nowEl = document.getElementById('now');
+      const bpmEl = document.getElementById('bpm');
+      const keyEl = document.getElementById('key');
+      const sugsEl = document.getElementById('sugs');
+
+      if (!now.playing) {
+        nowEl.textContent = 'Aucune lecture en cours';
+        return;
+      }
+
+      nowEl.textContent = `${now.track.name} — ${now.track.artists}`;
+      bpmEl.textContent = now?.features?.tempo ? Math.round(now.features.tempo) : '—';
+      keyEl.textContent = now?.features?.key || '—';
+
+      const p = new URLSearchParams({ name: now.track.name, artists: now.track.artists, limit: '4' });
+      const sugs = await (await fetch('/ext/suggest?' + p.toString())).json();
+
+      sugsEl.innerHTML = '';
+      if (!Array.isArray(sugs) || sugs.length === 0) {
+        sugsEl.innerHTML = '<li>Aucune suggestion</li>';
+        return;
+      }
+
+      sugs.forEach(it => {
+        const li = document.createElement('li');
+        li.innerHTML = `<b>${it.name}</b> — ${it.artist}<br><small>${it.reason}</small>`;
+        li.style.cursor = 'pointer';
+        li.onclick = () => window.open(`https://open.spotify.com/track/${(it.uri||'').split(':').pop()}`,'_blank');
+        sugsEl.appendChild(li);
+      });
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>
