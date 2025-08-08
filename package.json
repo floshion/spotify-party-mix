@@ -1,10 +1,12 @@
 {
   "name": "spotify-party-mix",
   "version": "1.0.0",
-  "description": "Site/serveur Express pour Spotify Party Mix (sans verrou player)",
+  "description": "Site/serveur Express + chiffrement Staticrypt pour /player",
   "type": "module",
   "main": "server.js",
   "scripts": {
+    "encrypt-player": "staticrypt static/player.html $PASSWORD -o static/player.html",
+    "postinstall": "npm run encrypt-player",
     "start": "node server.js"
   },
   "dependencies": {
@@ -13,5 +15,7 @@
     "dotenv": "^16.4.5",
     "jszip": "^3.10.1"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "staticrypt": "^3.5.4"
+  }
 }
