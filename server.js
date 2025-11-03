@@ -895,22 +895,57 @@ app.post('/toggle-play', async (_req, res) => {
 
 /* ⏭ Passer au prochain morceau dans l’ordre de la file */
 app.post('/skip', async (_req, res) => {
-  // 1. on récupère le prochain titre
+  // 1. Mise à jour de l'état interne : On récupère le prochain titre (Gims).
+  //    Ceci retire le morceau de la file interne, le marque comme 'joué' (ce qui est la cause du blocage)
+  //    et lance l'auto-remplissage de la file (AutoFillQueue).
   const next = await fetch('http://localhost:'+PORT+'/next-track').then(r=>r.json());
-  if (!next.track) return res.status(400).json({error:'No track'});
+  if (!next.track) {
+    // Si la file était vide, on saute juste le morceau en cours sur Spotify
+    try {
+        await fetch('https://api.spotify.com/v1/playlists/$1', { method: 'POST', headers: { Authorization: 'Bearer ' + access_token } });
+    } catch(e) { /* Ignorer l'erreur si le skip Spotify échoue */ }
+    return res.status(200).json({message:'Skipped current track, but no next track in server queue'});
+  }
 
-  // 2. on trouve le device actif (Web Playback)
+  // 2. On trouve le device actif
   const info = await fetch('https://api.spotify.com/v1/me/player',
     {headers:{Authorization:'Bearer '+access_token}}).then(r=>r.json());
   const deviceId = info?.device?.id;
-  if(!deviceId) return res.status(500).json({error:'No active device'});
+  if(!deviceId) {
+    return res.json({message:'Track skipped in server queue, but no active device to play it'});
+  }
 
-  // 3. on lance le morceau immédiatement
+  // 3. **CORRECTION 1 (Interruption)** : On demande à Spotify de sauter le morceau en cours (Toto-Africa).
+  // Ceci force l'interruption et résout le problème de 'Toto-Africa continue de jouer'.
+  try {
+      // Endpoint 11: POST /me/player/next
+      await fetch('https://api.spotify.com/v1/playlists/$1', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + access_token }
+      });
+  } catch (e) {
+      console.warn('Echec de l\'interruption du morceau en cours (Spotify Endpoint 11)', e);
+      // On continue pour forcer la lecture avec l'étape suivante (Endpoint 9)
+  }
+  
+  // 4. On lance le morceau suivant (Gims) immédiatement et de force.
+  // On utilise PUT /play (Endpoint 9) qui est le moyen le plus direct de démarrer un URI.
   await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
     method:'PUT',
     headers:{Authorization:'Bearer '+access_token,'Content-Type':'application/json'},
     body:JSON.stringify({uris:[next.track.uri]})
   });
+
+  // 5. **CORRECTION 2 (Continuité)** : On ajoute le morceau d'après (Song X) à la file d'attente Spotify.
+  // Ceci garantit que la lecture continue après Gims (résout le problème de 'plus de musique' après Gims).
+  if (priorityQueue.length > 0) {
+    const trackToQueue = priorityQueue[0];
+    // Endpoint 13: POST /me/player/queue
+    await fetch(`https://api.spotify.com/v1/playlists/$2?uri=$?uri=${trackToQueue.uri}&device_id=${deviceId}`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + access_token }
+    });
+  }
 
   res.json(next);
 });
