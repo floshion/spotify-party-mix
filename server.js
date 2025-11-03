@@ -199,47 +199,6 @@ async function refreshAccessToken () {
 }
 await refreshAccessToken();
 setInterval(refreshAccessToken, 50*60*1000);
-/* ---------- Guarded fetch + Watchdog ---------------------------------------- */
-async function guardedFetch(url, opts={}, retry=0){
-  const res = await fetch(url, opts);
-  if (res.status === 401 && retry < 1){
-    await refreshAccessToken();
-    const h = Object.assign({}, opts.headers || {}, { Authorization: 'Bearer ' + access_token });
-    return guardedFetch(url, Object.assign({}, opts, { headers: h }), retry+1);
-  }
-  if ((res.status === 429 || res.status >= 500) && retry < 3){
-    const wait = Number(res.headers.get('Retry-After') || 0) * 1000 || (300 * (retry+1));
-    await new Promise(r => setTimeout(r, wait));
-    return guardedFetch(url, opts, retry+1);
-  }
-  return res;
-}
-
-// Watchdog: détecte un player bloqué en fin de piste et relance le contexte playlist
-setInterval(async () => {
-  try{
-    if (!access_token) return;
-    const status = await guardedFetch('https://api.spotify.com/v1/me/player', { headers:{ Authorization:'Bearer '+access_token } });
-    if (!status.ok) return;
-    const s = await status.json();
-    if (!s) return;
-    const inOurPlaylist = s.context && s.context.uri === ('spotify:playlist:' + SOURCE_PLAYLIST);
-    const stuck = (s.is_playing === false) && (s.progress_ms === 0) && (s.currently_playing_type === 'track');
-    if (stuck && inOurPlaylist){
-      const n = await guardedFetch('https://api.spotify.com/v1/me/player/next', { method:'POST', headers:{ Authorization:'Bearer '+access_token } });
-      if (!n.ok){
-        await guardedFetch('https://api.spotify.com/v1/me/player/play', {
-          method:'PUT',
-          headers:{ Authorization:'Bearer '+access_token, 'Content-Type':'application/json' },
-          body: JSON.stringify({ context_uri: 'spotify:playlist:' + SOURCE_PLAYLIST, position_ms: 0 })
-        });
-      }
-    }
-  }catch(e){
-    console.warn('watchdog error', e);
-  }
-}, 7000);
-
 
 // Précharge les caractéristiques audio de la playlist source au démarrage
 // afin de permettre des suggestions dès la première ouverture.  Sans cet
@@ -902,7 +861,7 @@ app.post('/new-session', async (req, res) => {
           await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
             method: 'PUT',
             headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ context_uri: 'spotify:playlist:' + SOURCE_PLAYLIST, offset: { uri: tr.uri }, position_ms: 0 })
+            body: JSON.stringify({ uris: [tr.uri] })
           });
         }
       }
@@ -950,7 +909,7 @@ app.post('/skip', async (_req, res) => {
   await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`,{
     method:'PUT',
     headers:{Authorization:'Bearer '+access_token,'Content-Type':'application/json'},
-    body: JSON.stringify({ context_uri: 'spotify:playlist:' + SOURCE_PLAYLIST, offset: { uri: next.track.uri }, position_ms: 0 })
+    body:JSON.stringify({uris:[next.track.uri]})
   });
 
   res.json(next);
